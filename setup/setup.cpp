@@ -30,7 +30,10 @@ constexpr const wchar_t* kGameFiles[] = {
     L"sce_sys/param.sfo",
     L"sce_module/libc.prx",
     L"sce_module/libSceFios2.prx",
+    L"FILE_PS4/archive00.lnk",
 };
+// An update holds the patched eboot and its own param.sfo.
+constexpr const wchar_t* kUpdateFiles[] = {L"eboot.bin", L"sce_sys/param.sfo"};
 constexpr wchar_t kIncomplete[] = L"\n\nThis folder is incomplete: unpack the whole release again.";
 #ifdef _WIN32
 constexpr wchar_t kSeparator[] = L"\\";
@@ -278,7 +281,8 @@ std::wstring strip(const std::wstring& s) {
     return s.substr(a, s.find_last_not_of(ws) - a + 1);
 }
 
-void write_paths(const fs::path& ini, const fs::path& game, const fs::path& save, const fs::path& dlc) {
+void write_paths(const fs::path& ini, const fs::path& game, const fs::path& update, const fs::path& save,
+                 const fs::path& dlc) {
 #ifdef _WIN32
     const std::string setup = "deception-setup.exe", cache = "%LOCALAPPDATA%\\Deception";
 #else
@@ -286,13 +290,15 @@ void write_paths(const fs::path& ini, const fs::path& game, const fs::path& save
 #endif
     const std::string nl = kNewline;
     write_text(ini, "; Written by " + setup + ". Run it again to change these folders." + nl +
-                    "; game: your dump (eboot.bin, sce_module, sce_sys, stream.dat). It is only ever read." + nl +
+                    "; game: your dump (eboot.bin, sce_module, sce_sys, FILE_PS4). It is only ever read." + nl +
+                    "; update: optional, the dump of its update (patch), laid over the game. Only ever read." + nl +
                     "; save: your saves, and deception.log in its log folder." + nl +
                     "; dlc: optional, one more folder of DLC (e.g. shadPS4's addcont), next to save's addcont." + nl +
                     "; Shader caches are shared by every copy of the game: " + cache + nl +
                     "; (cache=<folder> moves them)." + nl +
                     "[paths]" + nl +
                     "game=" + narrow(text(game)) + nl +
+                    (update.empty() ? std::string() : "update=" + narrow(text(update)) + nl) +
                     "save=" + narrow(text(save)) + nl +
                     (dlc.empty() ? std::string() : "dlc=" + narrow(text(dlc)) + nl));
 }
@@ -489,6 +495,22 @@ std::vector<std::wstring> missing_game_files(const fs::path& game) {
     return missing;
 }
 
+std::vector<std::wstring> missing_update_files(const fs::path& update) {
+    std::error_code ec;
+    std::vector<std::wstring> missing;
+    for (const wchar_t* f : kUpdateFiles)
+        if (!fs::is_regular_file(update / f, ec))
+            missing.push_back(text(fs::path(f).make_preferred()));
+    return missing;
+}
+
+fs::path update_beside(const fs::path& game) {
+    std::error_code ec;
+    fs::path folder = game_folder(game);
+    fs::path update = folder.parent_path() / (folder.filename().wstring() + L"-patch");
+    return fs::is_regular_file(update / L"eboot.bin", ec) ? update : fs::path();
+}
+
 fs::path user_paths_ini() {
 #ifdef _WIN32
     const wchar_t* appdata = _wgetenv(L"APPDATA");
@@ -501,7 +523,7 @@ fs::path user_paths_ini() {
 
 namespace {
 
-// game=, save= and dlc= of `ini`; relative values are relative to `root`.
+// game=, update=, save= and dlc= of `ini`; relative values are relative to `root`.
 std::optional<Paths> read_paths_file(const fs::path& ini, const fs::path& root) {
     std::error_code ec;
     if (ini.empty() || !fs::is_regular_file(ini, ec))
@@ -527,6 +549,8 @@ std::optional<Paths> read_paths_file(const fs::path& ini, const fs::path& root) 
             paths.save = clean(root / path_of(value));
         else if (key == L"dlc")
             paths.dlc = clean(root / path_of(value));
+        else if (key == L"update")
+            paths.update = clean(root / path_of(value));
     }
     if (paths.game.empty() || paths.save.empty())
         return std::nullopt;
@@ -588,6 +612,7 @@ bool has_saves(const fs::path& save) {
 fs::path install(const Options& opt, const Log& log) {
     fs::path root = clean(opt.root), game = game_folder(opt.game), save = clean(opt.save);
     fs::path dlc = opt.dlc.empty() ? fs::path() : clean(opt.dlc);
+    fs::path update = opt.update.empty() ? fs::path() : game_folder(opt.update);
     fs::path prepare = root / L"prepare", image = root / L"game", exe = root / kGameExe;
     if (inside(save, game))
         fail(L"Choose a save folder outside the game folder. Setup never writes into the game folder.");
@@ -604,6 +629,14 @@ fs::path install(const Options& opt, const Log& log) {
     if (!missing.empty())
         fail(L"This folder isn't a decrypted Deception dump:\n" + text(game) +
              L"\n\nMissing: " + join(missing));
+    if (!update.empty()) {
+        missing = missing_update_files(update);
+        if (!missing.empty())
+            fail(L"This folder isn't a decrypted update:\n" + text(update) + L"\n\nMissing: " + join(missing) +
+                 L"\n\nChoose another one, or leave it empty.");
+        if (inside(save, update) || inside(root, update) || inside(update, root))
+            fail(L"Keep the update folder apart from this folder and the save folder.");
+    }
     for (const fs::path& f : {exe, prepare / L"run.py", root / L"release.txt"})
         if (!fs::is_regular_file(f, ec))
             fail(text(f) + L" is missing." + kIncomplete);
@@ -614,6 +647,8 @@ fs::path install(const Options& opt, const Log& log) {
     std::vector<std::wstring> command = python;
     command.insert(command.end(), {text(prepare / L"run.py"), L"prepare", L"--game", text(game),
                                    L"--out", text(image)});
+    if (!update.empty())
+        command.insert(command.end(), {L"--update", text(update)});
 #ifdef _WIN32
     SetEnvironmentVariableW(L"PYTHONIOENCODING", L"utf-8");
 #else
@@ -675,14 +710,15 @@ fs::path install(const Options& opt, const Log& log) {
             log(L"set      skip_intro=" + value + L" in " + text(ini));
         }
     }
-    write_paths(root / L"paths.ini", game, save, dlc);
-    log(L"wrote    paths.ini (game " + text(game) + L", save " + text(save) +
+    write_paths(root / L"paths.ini", game, update, save, dlc);
+    log(L"wrote    paths.ini (game " + text(game) + (update.empty() ? L"" : L", update " + text(update)) +
+        L", save " + text(save) +
         (dlc.empty() ? L"" : L", dlc " + text(dlc)) + L")");
     // The per-user copy, for the next release unpacked elsewhere; the game runs without it.
     if (fs::path user = user_paths_ini(); !user.empty()) {
         try {
             fs::create_directories(user.parent_path(), ec);
-            write_paths(user, clean(game), clean(save), dlc);
+            write_paths(user, clean(game), update, clean(save), dlc);
             log(L"wrote    " + text(user));
         } catch (const Error& e) {
             log(L"skipped  " + text(user) + L" (" + e.message + L")");

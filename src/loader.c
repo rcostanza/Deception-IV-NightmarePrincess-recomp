@@ -620,8 +620,7 @@ int main(int argc, char **argv) {
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *isa_file=NULL, *dlc_dir=NULL, *update_dir=NULL;
     const char *mounts[24]; int mount_count=0;  /* --mount guest=host: one game file or folder each */
-    /* The game's own argv after /app0/eboot.bin: --guest-arg each, then the engine's switches the
-     * settings ask for (skip_intro: -nosplash). */
+    /* The game's own argv after /app0/eboot.bin: --guest-arg each. */
     enum { GUEST_ARGS=16 };
     const char *guest_argv[GUEST_ARGS+2]={"/app0/eboot.bin"}; int guest_argc=1;
     for (int i = 2; i < argc; ++i) {
@@ -967,9 +966,6 @@ int main(int argc, char **argv) {
                     missing, r.rewritten, r.jmp, r.relocated, r.int3, r.skipped);
         protect(stubs, stub_area, 5);
     }
-    /* A 4:3, 21:9 or 32:9 output: the engine is resized before its code runs (runtime_game.c). */
-    if (gpu_enabled && deception_width_4k() != 3840 && !runtime_game_widen(image, (uint32_t)deception_width_4k()))
-        deception_set_width_4k(3840);
     runtime_set_report_hook(loader_report_hook);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);

@@ -425,10 +425,8 @@ DisplayRowText DisplayRowAt(int row) {
         if (ratio == DeceptionSettings::Aspect16x9) text += "  (PS4)";
         if (ratio != s.startup_aspect_ratio) text += "  (after restart)";
         return {"Aspect ratio", text,
-                "The picture's shape. 21:9 and 32:9 show more of the level to the sides, for ultrawide screens, "
-                "4:3 more above and below; "
-                "the menus stay 16:9. A window takes sizes of this shape; fullscreen picks one from the screen. "
-                "The game takes a new shape after a restart."};
+                "The window's shape: a window takes sizes of this shape; fullscreen picks one from the screen. "
+                "The game itself stays 16:9, with black bars on other shapes. Takes effect after a restart."};
     }
     case RowResolution: {
         const auto [w, h] = ShownResolution();

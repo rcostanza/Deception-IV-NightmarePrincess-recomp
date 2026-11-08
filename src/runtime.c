@@ -247,8 +247,6 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (np) return np;
     uintptr_t devices = runtime_devices_resolve(name);
     if (devices) return devices;
-    uintptr_t ajm = runtime_ajm_resolve(name);
-    if (ajm) return ajm;
     uintptr_t audio = runtime_audio_resolve(name);
     if (audio) return audio;
     uintptr_t pad = runtime_pad_resolve(name);

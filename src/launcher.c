@@ -2,7 +2,8 @@
  * folder (tools/package.py) holds this exe, its libraries, release.txt and deception-setup; the
  * setup adds the prepared game image in game/, settings.ini and paths.ini:
  *     [paths]
- *     game=<the dump: eboot.bin, sce_module, sce_sys, audio.pck, stream.dat>
+ *     game=<the dump: eboot.bin, sce_module, sce_sys, FILE_PS4>
+ *     update=<optional: its decrypted update (patch), laid over the game as the PS4 does>
  *     save=<saves and the launch log: what run.py calls --user>
  *     cache=<optional: shader caches; by default the folder every copy shares, as run.py's>
  *     dlc=<optional: one more folder of DLC, read next to save's addcont, e.g. shadPS4's addcont>
@@ -34,10 +35,10 @@
 #define SETUP "deception-setup"
 #endif
 
-#define TITLE "Deception"
+#define TITLE "Deception IV: The Nightmare Princess"
 #define RUN_SETUP "Run " SETUP " (in the game's folder) to set the game up."
 
-static char exe_dir[PATH_CHARS], game[PATH_CHARS], save[PATH_CHARS], cache[PATH_CHARS], dlc[PATH_CHARS];
+static char exe_dir[PATH_CHARS], game[PATH_CHARS], save[PATH_CHARS], cache[PATH_CHARS], dlc[PATH_CHARS], update[PATH_CHARS];
 static char boot[PATH_CHARS], profile[PATH_CHARS], isa[PATH_CHARS], log_path[PATH_CHARS];
 static char *args[64];
 static int unattended; /* started from Explorer, a file manager or a shortcut: nobody reads the output */
@@ -103,9 +104,9 @@ static void user_paths_ini(char *out) {
 #endif
 }
 
-/* game=, save=, cache= and dlc= of paths.ini; 1 when game and save are there. */
+/* game=, update=, save=, cache= and dlc= of paths.ini; 1 when game and save are there. */
 static int read_paths(const char *ini) {
-    game[0] = save[0] = cache[0] = dlc[0] = 0;
+    game[0] = update[0] = save[0] = cache[0] = dlc[0] = 0;
     FILE *f = fopen(ini, "rb");
     if (!f) return 0;
     char line[PATH_CHARS + 64];
@@ -123,6 +124,7 @@ static int read_paths(const char *ini) {
         else if (!strcasecmp(key, "save")) set_path(save, value);
         else if (!strcasecmp(key, "cache")) set_path(cache, value);
         else if (!strcasecmp(key, "dlc")) set_path(dlc, value);
+        else if (!strcasecmp(key, "update")) set_path(update, value);
     }
     fclose(f);
     if (!cache[0]) shared_cache(cache);
@@ -392,6 +394,12 @@ int launch_from_paths_ini(int *argc, char ***argv) {
         complain(message);
         return 1;
     }
+    snprintf(eboot, sizeof eboot, "%s" SEP "eboot.bin", update);
+    if (update[0] && !exists(eboot)) {
+        snprintf(message, sizeof message, "The update folder is gone or has no eboot.bin:\n%s\n\n" RUN_SETUP, update);
+        complain(message);
+        return 1;
+    }
     if (!make_dirs(save)) {
         snprintf(message, sizeof message, "Cannot create the save folder:\n%s\n\n" RUN_SETUP, save);
         complain(message);
@@ -435,6 +443,7 @@ int launch_from_paths_ini(int *argc, char ***argv) {
     args[count++] = "--content-profile"; args[count++] = profile;
     args[count++] = "--app0"; args[count++] = game;
     args[count++] = "--user"; args[count++] = save;
+    if (update[0]) { args[count++] = "--update"; args[count++] = update; }
     if (dlc[0]) { args[count++] = "--dlc"; args[count++] = dlc; }
     args[count++] = "--timeout"; args[count++] = "0";
     if (exists(isa)) { args[count++] = "--isa-rewrite"; args[count++] = isa; }
@@ -442,6 +451,7 @@ int launch_from_paths_ini(int *argc, char ***argv) {
         if (strcmp((*argv)[i], "--console")) args[count++] = (*argv)[i];
     args[count] = NULL;
     printf("Launch: %s (%s)\nLaunch: game %s\nLaunch: save %s\nLaunch: cache %s\n", ini, current, game, save, cache);
+    if (update[0]) printf("Launch: update %s\n", update);
     if (dlc[0]) printf("Launch: dlc %s\n", dlc);
     *argc = count;
     *argv = args;

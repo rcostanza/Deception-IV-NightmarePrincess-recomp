@@ -35,16 +35,6 @@ inline int ParseAudioChannels(std::string_view value) {
 enum RenderResolution : int { Render1080p = 0, Render4k, RenderResolutionCount };
 inline constexpr std::string_view RenderResolutionKeys[RenderResolutionCount] = {"1080p", "4k"};
 
-/// The game's display width at 2160 lines for an output of w x h: 3840 (16:9) for a 16:9 output
-/// (within 1%: 1366x768 is 16:9), else from 2880 (4:3) to 7680 (32:9), in steps of 16 so the
-/// 1080p row and the checkerboard scene (both half) stay whole: 2560x1080 gives 5120, 3440x1440
-/// 5168. The engine is resized to it at start (src/runtime_game.c runtime_game_widen).
-inline int WideWidth4k(int w, int h) {
-    if (w <= 0 || h <= 0) return 3840;
-    const double aspect = std::clamp(double(w) / h, 4.0 / 3.0, 32.0 / 9.0);
-    const int width = int(2160.0 * aspect / 16.0 + 0.5) * 16;
-    return std::abs(width - 3840) <= 3840 / 100 ? 3840 : width;
-}
 
 /// "21:9" and the like for a size (within 3%: 2560x1080 and 3440x1440 are 21:9), else "2.10:1".
 inline std::string AspectLabel(int w, int h) {
@@ -141,11 +131,8 @@ struct Values {
     int desktop_width = 0, desktop_height = 0;
     /// What the fullscreen modes show now (PickFullscreen's picture), set by the window thread.
     std::atomic<int> fullscreen_width{0}, fullscreen_height{0};
-    /// WideWidth4k of the game's size at start (the window's, or the fullscreen pick): its display
-    /// width at 2160 lines, 3840 at 16:9. Read once, before the game starts.
-    std::atomic<int> startup_width_4k{3840};
-    /// Skip the start-up logos and notices: the game starts with its own -nosplash switch
-    /// (src/loader.c); read once, before the game starts. On by default.
+    /// Hurry through the start-up logos and confirm the autosave notice (src/runtime_intro.c);
+    /// read once, before the game starts. On by default.
     bool skip_intro = true;
     /// The game's frame rate: 30, 60, 90, 120, 144 or 180 (DeceptionGraphics::FrameRates). The PS4 vblank
     /// (videoout driver) and the engine's target frame rate (src/runtime_game.c, at each flip)

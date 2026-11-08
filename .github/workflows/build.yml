@@ -263,7 +263,7 @@ jobs:
             echo
             echo "## Install"
             echo
-            echo "Windows: unzip ${WINDOWS}.zip and run deception-setup.exe. Linux: extract ${LINUX}-linux.tar.gz and run deception-setup. You need a decrypted dump of your own copy of Deception (CUSA00038, version 1.10); see README.txt."
+            echo "Windows: unzip ${WINDOWS}.zip and run deception-setup.exe. Linux: extract ${LINUX}-linux.tar.gz and run deception-setup. You need a decrypted dump of your own copy of Deception IV: The Nightmare Princess (CUSA02859) and its update (1.01); see README.txt."
           } > notes.md
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
             --notes-file notes.md "out/${WINDOWS}.zip" "out/${LINUX}-linux.tar.gz"

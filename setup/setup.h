@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 // The install itself, in the release folder the setup exe sits in (tools/package.py): prepares the game
-// image from the player's dump with prepare/run.py, and writes paths.ini (the dump, the save folder and
-// an optional extra DLC folder, read by src/launcher.c). The dump is only ever read. Windows (main.cpp) and Linux (main_linux.cpp)
+// image from the player's dump with prepare/run.py, and writes paths.ini (the dump, its optional update,
+// the save folder and an optional extra DLC folder, read by src/launcher.c). The dump is only ever read. Windows (main.cpp) and Linux (main_linux.cpp)
 // share it.
 
 #include <filesystem>
@@ -22,6 +22,7 @@ struct Error {
 struct Options {
     std::filesystem::path root; // the release folder: the game exe, prepare/, and what the setup adds
     std::filesystem::path game; // the dump folder or its eboot.bin
+    std::filesystem::path update; // optional: the decrypted update (patch) laid over it; empty for none
     std::filesystem::path save; // saves and the launch log (run.py's --user)
     std::optional<std::filesystem::path> copy_saves_from; // the old save folder, whose saves go to `save`
     std::optional<bool> skip_intro; // settings.ini skip_intro to write; unset keeps what is there
@@ -31,6 +32,7 @@ struct Options {
 // The folders a release folder's paths.ini names.
 struct Paths {
     std::filesystem::path game, save;
+    std::filesystem::path update; // empty when paths.ini names none
     std::filesystem::path dlc; // empty when paths.ini names none
 };
 
@@ -62,6 +64,10 @@ std::filesystem::path exe_folder();
 std::filesystem::path game_folder(const std::filesystem::path& path);
 // The files a Deception dump needs that `game` (a path game_folder() accepts) lacks; empty for a dump.
 std::vector<std::wstring> missing_game_files(const std::filesystem::path& game);
+// The files an update needs that `update` lacks; empty for an update.
+std::vector<std::wstring> missing_update_files(const std::filesystem::path& update);
+// shadPS4's place for a game's update: the folder next to it named <game>-patch; empty when there is none.
+std::filesystem::path update_beside(const std::filesystem::path& game);
 // What `root`/paths.ini names, if it names both folders.
 std::optional<Paths> read_paths(const std::filesystem::path& root);
 // The per-user copy of paths.ini that install() also writes: %APPDATA%\Deception\paths.ini, or $XDG_CONFIG_HOME/deception/paths.ini (~/.config when unset); src/launcher.c

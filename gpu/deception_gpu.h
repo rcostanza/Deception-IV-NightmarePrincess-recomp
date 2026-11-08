@@ -47,18 +47,12 @@ void deception_gpu_request_quit(void);
 /* 1 when settings.ini render_resolution (DECEPTION_RENDER_RESOLUTION) is 4k: the game runs in PS4
  * Pro mode with a 3840x2160 video out. Valid once deception_gpu_init returned. */
 int deception_render_4k(void);
-/* The game's display width at 2160 lines: 3840 (16:9) for a 16:9 or narrower output, up to 7680
- * (32:9) for a wider one; the output at start decides (the window's size, the desktop's in
- * borderless). The video out is that wide (half with render_resolution=1080p) and
- * runtime_game_widen widens the engine to match. Valid once deception_gpu_init returned. */
-int deception_width_4k(void);
-/* Sets it back (3840) when the engine could not be widened; before the game opens its video out. */
-void deception_set_width_4k(int width);
 /* 1 when settings.ini hdr (DECEPTION_HDR) is on: the video out offers BT.2020 PQ when the display
  * has an HDR10 surface, and the game then outputs HDR. Valid once deception_gpu_init returned. */
 int deception_hdr(void);
-/* 1 when settings.ini skip_intro (DECEPTION_SKIP_INTRO, default on) is on: the game starts without
- * its start-up logos and notices (-nosplash). Valid once deception_gpu_init returned. */
+/* 1 when settings.ini skip_intro (DECEPTION_SKIP_INTRO, default on) is on: the start-up logos are
+ * hurried and the autosave notice confirmed (src/runtime_intro.c). Valid once deception_gpu_init
+ * returned. */
 int deception_skip_intro(void);
 /* settings.ini frame_rate (DECEPTION_FRAME_RATE): 30, 60, 90, 120, 144 or 180; the Display Settings panel
  * changes it while the game runs. The PS4 vblank runs at it and the engine's target frame rate is set to

@@ -159,11 +159,8 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
                                                                 {settings.desktop_width, settings.desktop_height}, settings.modes);
             std::tie(w, h) = choice.picture;
         }
-        settings.startup_width_4k = DeceptionSettings::WideWidth4k(w, h);
-        std::printf("Display: %s %dx%d (%s): the game's picture is %dx2160%s\n",
-                    mode == DeceptionGraphics::Windowed ? "window" : "fullscreen picture", w, h,
-                    DeceptionSettings::AspectLabel(w, h).c_str(), settings.startup_width_4k.load(),
-                    settings.startup_width_4k > 3840 ? ", wider than the PS4's" : "");
+        std::printf("Display: %s %dx%d (%s)\n", mode == DeceptionGraphics::Windowed ? "window" : "fullscreen picture",
+                    w, h, DeceptionSettings::AspectLabel(w, h).c_str());
     }
     const bool too_large = StartSize(width_, height_, display);
     SDL_PropertiesID props = SDL_CreateProperties();

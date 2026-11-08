@@ -42,7 +42,7 @@ int main(void) {
     if (!tmp) tmp=getenv("TEMP");
     if (!tmp) tmp="/tmp";
     snprintf(user_dir,sizeof(user_dir),"%s/deception-savedata-test-%d",tmp,(int)getpid());
-    runtime_savedata_configure("CUSA00038");
+    runtime_savedata_configure("CUSA02859");
     assert(runtime_savedata_mtime(1,"savedata")==0); /* no saves yet */
 
     assert(save_initialize(NULL)==0);

@@ -54,12 +54,12 @@ grep -q 'The game is not set up yet' "$work/unset.log" || { cat "$work/unset.log
 
 # A folder that is not a dump, then one that has the files the setup looks for (empty, so the
 # preparation itself fails, in python3).
-mkdir -p "$work/empty" "$work/dump/sce_sys" "$work/dump/sce_module"
+mkdir -p "$work/empty" "$work/dump/sce_sys" "$work/dump/sce_module" "$work/dump/FILE_PS4"
 status=0
 ./deception-setup --game "$work/empty" --save "$work/save" >"$work/setup-empty.log" 2>&1 || status=$?
 grep -q "isn't a decrypted Deception dump" "$work/setup-empty.log" ||
     { cat "$work/setup-empty.log"; fail 'the setup took a folder without eboot.bin'; }
-for f in eboot.bin sce_sys/param.sfo sce_module/libc.prx sce_module/libSceFios2.prx audio.pck stream.dat; do
+for f in eboot.bin sce_sys/param.sfo sce_module/libc.prx sce_module/libSceFios2.prx FILE_PS4/archive00.lnk; do
     : >"$work/dump/$f"
 done
 status=0

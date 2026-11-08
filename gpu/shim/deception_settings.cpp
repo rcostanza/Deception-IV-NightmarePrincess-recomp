@@ -286,13 +286,6 @@ extern "C" int deception_hdr(void) {
     return DeceptionSettings::Get().startup_hdr ? 1 : 0;
 }
 
-extern "C" int deception_width_4k(void) {
-    return DeceptionSettings::Get().startup_width_4k.load();
-}
-
-extern "C" void deception_set_width_4k(int width) {
-    DeceptionSettings::Get().startup_width_4k = width;
-}
 
 extern "C" int deception_render_4k(void) {
     return DeceptionSettings::Get().startup_render_resolution == DeceptionSettings::Render4k;

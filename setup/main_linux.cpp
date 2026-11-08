@@ -10,7 +10,7 @@
 // With arguments it installs from the command line:
 //
 //     deception-setup --game <dump or eboot.bin> [--save <folder>] [--copy-saves]
-//                       [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]
+//                       [--update <folder>|--no-update] [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]
 //                       [--shortcut <folder>|desktop|menu]
 
 #include "setup.h"
@@ -51,10 +51,13 @@ void err(const std::wstring& s) {
 // --- command line -------------------------------------------------------------------------------
 
 constexpr wchar_t kUsage[] =
-    L"usage: deception-setup --game <dump or eboot.bin> [--save <folder>] [--copy-saves]\n"
+    L"usage: deception-setup --game <dump or eboot.bin> [--update <folder>|--no-update]\n"
+    L"                         [--save <folder>] [--copy-saves]\n"
     L"                         [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]\n"
     L"                         [--shortcut <folder>|desktop|menu]\n"
-    L"  --game        the decrypted game dump (eboot.bin, sce_module, sce_sys, stream.dat); only ever read\n"
+    L"  --game        the decrypted game dump (eboot.bin, sce_module, sce_sys, FILE_PS4); only ever read\n"
+    L"  --update      its decrypted update (patch), laid over the game (default: the one paths.ini\n"
+    L"                names, else <game>-patch next to it, as shadPS4 keeps it); --no-update runs without\n"
     L"  --save        where your saves go (default: the one paths.ini names, else save/ here)\n"
     L"  --copy-saves  when --save changes, copy the saves from the old save folder\n"
     L"  --dlc         one more folder of DLC to read, e.g. shadPS4's addcont (default: the one\n"
@@ -75,8 +78,8 @@ fs::path shortcut_folder(const std::wstring& where) {
 }
 
 int run_cli(const std::vector<std::wstring>& args) {
-    std::wstring game, save, shortcut, dlc;
-    bool copy_saves = false, no_dlc = false;
+    std::wstring game, save, shortcut, dlc, update;
+    bool copy_saves = false, no_dlc = false, no_update = false;
     std::optional<bool> skip_intro;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::wstring& a = args[i];
@@ -84,6 +87,7 @@ int run_cli(const std::vector<std::wstring>& args) {
                               : a == L"--save"     ? &save
                               : a == L"--shortcut" ? &shortcut
                               : a == L"--dlc"      ? &dlc
+                              : a == L"--update"   ? &update
                                                    : nullptr;
         if (value && i + 1 < args.size()) {
             *value = args[++i];
@@ -93,6 +97,8 @@ int run_cli(const std::vector<std::wstring>& args) {
             skip_intro = a == L"--skip-intro";
         } else if (a == L"--no-dlc") {
             no_dlc = true;
+        } else if (a == L"--no-update") {
+            no_update = true;
         } else {
             err(a == L"--help" || a == L"-h" ? kUsage : std::wstring(kUsage) + L"\n\nunexpected: " + a);
             return 2;
@@ -109,6 +115,10 @@ int run_cli(const std::vector<std::wstring>& args) {
         auto old = setup::remembered_paths(opt.root);
         opt.save = !save.empty() ? setup::path_of(save) : old ? old->save : setup::default_save();
         opt.dlc = no_dlc ? fs::path() : !dlc.empty() ? setup::path_of(dlc) : old ? old->dlc : fs::path();
+        opt.update = no_update                     ? fs::path()
+                     : !update.empty()             ? setup::path_of(update)
+                     : old && !old->update.empty() ? old->update
+                                                   : setup::update_beside(opt.game);
         if (copy_saves)
             opt.copy_saves_from = saves_to_move(opt.root, opt.save);
         opt.skip_intro = skip_intro;
@@ -279,6 +289,7 @@ int run_asking(Asker& ask) {
     }
     if (setup::ready(root)) {
         int answer = ask.choose(L"The game is set up.\n\nGame folder: " + setup::text(paths->game) +
+                                    (paths->update.empty() ? L"" : L"\nUpdate folder: " + setup::text(paths->update)) +
                                     L"\nSave folder: " + setup::text(paths->save) +
                                     (paths->dlc.empty() ? L"" : L"\nExtra DLC folder: " + setup::text(paths->dlc)),
                                 {L"Play Game", L"Set up again", L"Exit"});
@@ -294,6 +305,23 @@ int run_asking(Asker& ask) {
         ask.folder(L"Select the game folder (your game dump, the one with eboot.bin)", paths ? paths->game : fs::path());
     if (!game)
         return 1;
+    // Its update (patch): the one named before, else shadPS4's <game>-patch beside it.
+    fs::path update = paths && !paths->update.empty() ? paths->update : setup::update_beside(*game);
+    int patched = update.empty()
+                      ? ask.choose(L"Do you have the game's update (patch) dumped too?",
+                                   {L"No", L"Choose its folder", L"Cancel"})
+                      : ask.choose(L"Use this update (patch)?\n\n" + setup::text(update),
+                                   {L"Yes", L"Choose another folder", L"No", L"Cancel"});
+    if (patched < 0 || patched == (update.empty() ? 2 : 3))
+        return 1;
+    if (patched == 1) {
+        std::optional<fs::path> picked = ask.folder(L"Select the update folder (the patch, with its own eboot.bin)", update);
+        if (!picked)
+            return 1;
+        update = *picked;
+    } else if (!update.empty() && patched == 2) {
+        update.clear();
+    }
     fs::path save = paths ? paths->save : setup::default_save();
     int keep = ask.choose(L"Keep your saves in this folder?\n\n" + setup::text(save),
                           {L"Yes", L"Choose another folder", L"Cancel"});
@@ -335,6 +363,7 @@ int run_asking(Asker& ask) {
     setup::Options opt;
     opt.root = root;
     opt.game = *game;
+    opt.update = update;
     opt.save = save;
     opt.skip_intro = (skip == 0) == skipping;
     opt.dlc = dlc;

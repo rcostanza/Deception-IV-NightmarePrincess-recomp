@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the minimal static FFmpeg the runner links (build.sh runs it when PREFIX is missing or was
-# configured differently): only what Deception uses. Its movies (video/title.mp4, menu.mp4) are MP4
+# configured differently): only what Deception uses. Its movies (FILE_PS4/MOVIE/*.mp4) are MP4
 # with H.264 video; AvPlayer also accepts AAC audio; save icons and the start-up picture are PNG.
 # AvPlayer opens the movie's host path (the file protocol) or reads through the game's own I/O
 # callbacks; no network protocol is built. The release then carries no FFmpeg DLLs or their codec

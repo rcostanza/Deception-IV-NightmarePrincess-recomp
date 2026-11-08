@@ -2,13 +2,13 @@
 // deception-setup.exe: sets up the release folder it sits in (tools/package.py) from the player's
 // Deception dump, so the game starts from deception.exe or a desktop shortcut.
 //
-// With no arguments it opens a window: the game folder (the dump), the extra DLC folder, the save
+// With no arguments it opens a window: the game folder (the dump), its update, the extra DLC folder, the save
 // folder, whether to skip the intro logos (settings.ini skip_intro), Install and Exit; after an
 // install it offers a desktop shortcut. Run it again to change a folder, or after unpacking a newer
 // release over the folder.
 // With arguments it installs from the command line:
 //
-//     deception-setup.exe --game <dump or eboot.bin> [--save <folder>] [--copy-saves]
+//     deception-setup.exe --game <dump or eboot.bin> [--update <folder>|--no-update] [--save <folder>] [--copy-saves]
 //                           [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]
 //                           [--shortcut <folder>|desktop]
 
@@ -78,10 +78,13 @@ private:
 };
 
 constexpr wchar_t kUsage[] =
-    L"usage: deception-setup.exe --game <dump or eboot.bin> [--save <folder>] [--copy-saves]\n"
+    L"usage: deception-setup.exe --game <dump or eboot.bin> [--update <folder>|--no-update]\n"
+    L"                             [--save <folder>] [--copy-saves]\n"
     L"                             [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]\n"
     L"                             [--shortcut <folder>|desktop]\n"
-    L"  --game        the decrypted game dump (eboot.bin, sce_module, sce_sys, stream.dat); only ever read\n"
+    L"  --game        the decrypted game dump (eboot.bin, sce_module, sce_sys, FILE_PS4); only ever read\n"
+    L"  --update      its decrypted update (patch), laid over the game (default: the one paths.ini\n"
+    L"                names, else <game>-patch next to it, as shadPS4 keeps it); --no-update runs without\n"
     L"  --save        where your saves go (default: the one paths.ini names, else save\\ here)\n"
     L"  --copy-saves  when --save changes, copy the saves from the old save folder\n"
     L"  --dlc         one more folder of DLC to read, e.g. shadPS4's addcont (default: the one\n"
@@ -94,8 +97,8 @@ constexpr wchar_t kUsage[] =
 
 int run_cli(const std::vector<std::wstring>& args) {
     Console con;
-    std::wstring game, save, shortcut, dlc;
-    bool copy_saves = false, no_dlc = false;
+    std::wstring game, save, shortcut, dlc, update;
+    bool copy_saves = false, no_dlc = false, no_update = false;
     std::optional<bool> skip_intro;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::wstring& a = args[i];
@@ -103,6 +106,7 @@ int run_cli(const std::vector<std::wstring>& args) {
                               : a == L"--save"     ? &save
                               : a == L"--shortcut" ? &shortcut
                               : a == L"--dlc"      ? &dlc
+                              : a == L"--update"   ? &update
                                                    : nullptr;
         if (value && i + 1 < args.size()) {
             *value = args[++i];
@@ -112,6 +116,8 @@ int run_cli(const std::vector<std::wstring>& args) {
             skip_intro = a == L"--skip-intro";
         } else if (a == L"--no-dlc") {
             no_dlc = true;
+        } else if (a == L"--no-update") {
+            no_update = true;
         } else {
             con.err(a == L"--help" || a == L"-h" ? kUsage : std::wstring(kUsage) + L"\n\nunexpected: " + a);
             return 2;
@@ -128,6 +134,10 @@ int run_cli(const std::vector<std::wstring>& args) {
         auto old = setup::remembered_paths(opt.root);
         opt.save = !save.empty() ? fs::path(save) : old ? old->save : setup::default_save();
         opt.dlc = no_dlc ? fs::path() : !dlc.empty() ? fs::path(dlc) : old ? old->dlc : fs::path();
+        opt.update = no_update            ? fs::path()
+                     : !update.empty()    ? fs::path(update)
+                     : old && !old->update.empty() ? old->update
+                                          : setup::update_beside(opt.game);
         if (copy_saves)
             opt.copy_saves_from = saves_to_move(opt.root, opt.save);
         opt.skip_intro = skip_intro;
@@ -149,11 +159,13 @@ int run_cli(const std::vector<std::wstring>& args) {
 // Drawn in the colours of the game's Display Settings panel (F10; gpu/shim/deception_overlay.cpp
 // PageInk, as they show on screen): a framed dark-teal panel on deep blue, teal rows, and the
 // highlighted cyan for the action that is ready. Install stays disabled until the game folder holds a
-// Deception dump, the DLC folder (optional) exists when one is named, and a save folder is named.
+// Deception dump, the update and DLC folders (optional) are usable when named, and a save folder is named.
 
 enum : int {
     kGameEdit = 101,
     kGameBrowse,
+    kUpdateEdit,
+    kUpdateBrowse,
     kDlcEdit,
     kDlcBrowse,
     kSaveEdit,
@@ -187,7 +199,8 @@ struct Folder {
 
 struct Ui {
     HWND wnd = nullptr, play = nullptr, install = nullptr, exit = nullptr, skip_intro = nullptr;
-    Folder game{L"Game folder", 66}, dlc{L"Extra DLC folder (optional)", 146}, save{L"Save folder", 226};
+    Folder game{L"Game folder", 66}, update{L"Update folder (optional)", 146}, dlc{L"Extra DLC folder (optional)", 226},
+        save{L"Save folder", 306};
     std::vector<HWND> inputs; // disabled while installing (Play Game too, and until the folder is set up)
     HFONT font = nullptr, bold = nullptr, title = nullptr;
     HBRUSH field = nullptr;
@@ -200,9 +213,9 @@ struct Ui {
 Ui ui;
 
 // Layout in 96-dpi units; the client area is kWidth x kHeight.
-constexpr int kWidth = 640, kHeight = 452;
+constexpr int kWidth = 640, kHeight = 532;
 constexpr int kRowLeft = 36, kRowRight = 604, kRowHeight = 72, kFieldLeft = 58, kBrowseLeft = 480, kBrowseWidth = 104;
-constexpr int kPanelTop = 40, kPanelBottom = 352, kButtonsTop = 404;
+constexpr int kPanelTop = 40, kPanelBottom = 432, kButtonsTop = 484;
 
 int px(int v) {
     return MulDiv(v, static_cast<int>(ui.dpi), 96);
@@ -295,7 +308,7 @@ void paint(HDC dc) {
     RECT tab = rect(kWidth / 2 - 140, 12, 280, 42);
     shape(dc, tab, px(12), color::Tab, color::Panel, color::Frame, px(2));
     text(dc, L"DECEPTION SETUP", tab, ui.title, color::Text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    for (const Folder* f : {&ui.game, &ui.dlc, &ui.save})
+    for (const Folder* f : {&ui.game, &ui.update, &ui.dlc, &ui.save})
         paint_folder(dc, *f);
     text(dc, ui.status, rect(24, kPanelBottom + 10, kWidth - 48, kButtonsTop - kPanelBottom - 16), ui.font,
          ui.status_bad ? color::Bad : color::Help, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
@@ -306,7 +319,7 @@ void paint(HDC dc) {
 void draw_button(const DRAWITEMSTRUCT& d) {
     HDC dc = d.hDC;
     RECT r = d.rcItem;
-    fill(dc, r, d.hwndItem == ui.skip_intro ? color::Panel : d.CtlID == kGameBrowse || d.CtlID == kDlcBrowse ||
+    fill(dc, r, d.hwndItem == ui.skip_intro ? color::Panel : d.CtlID == kGameBrowse || d.CtlID == kUpdateBrowse || d.CtlID == kDlcBrowse ||
                                                                  d.CtlID == kSaveBrowse
                                                              ? color::RowBottom
                                                              : color::Back);
@@ -336,7 +349,7 @@ void draw_button(const DRAWITEMSTRUCT& d) {
     COLORREF bottom = disabled ? color::OffBottom : primary ? color::FocusBottom : color::RowBottom;
     if (pressed)
         std::swap(top, bottom);
-    bool browse = d.CtlID == kGameBrowse || d.CtlID == kDlcBrowse || d.CtlID == kSaveBrowse;
+    bool browse = d.CtlID == kGameBrowse || d.CtlID == kUpdateBrowse || d.CtlID == kDlcBrowse || d.CtlID == kSaveBrowse;
     int skew = browse ? 0 : (r.bottom - r.top) / 4; // Browse sits on a row's gradient: no corners to fill
     shape(dc, r, skew, top, bottom, focus ? color::FocusEdge : disabled ? color::Dim : color::RowEdge,
           focus ? px(2) : 1);
@@ -352,10 +365,11 @@ void set_status(std::wstring s, bool bad = false) {
     InvalidateRect(ui.wnd, &r, FALSE);
 }
 
-// Checks the three folders, shows the result in each row and enables Install when all are usable.
+// Checks the four folders, shows the result in each row and enables Install when all are usable.
 void validate() {
     std::error_code ec;
-    std::wstring game = text_of(ui.game.edit), dlc = text_of(ui.dlc.edit), save = text_of(ui.save.edit);
+    std::wstring game = text_of(ui.game.edit), update = text_of(ui.update.edit), dlc = text_of(ui.dlc.edit),
+                 save = text_of(ui.save.edit);
     ui.game.ok = false;
     if (game.empty()) {
         ui.game.note = L"Required: your decrypted dump";
@@ -367,13 +381,25 @@ void validate() {
         ui.game.ok = true;
         ui.game.note = L"Deception dump found";
     }
+    ui.update.ok = false;
+    if (update.empty()) {
+        ui.update.ok = true;
+        ui.update.note = L"Optional: none chosen";
+    } else if (!fs::is_directory(setup::game_folder(update), ec)) {
+        ui.update.note = L"Folder not found";
+    } else if (auto missing = setup::missing_update_files(setup::game_folder(update)); !missing.empty()) {
+        ui.update.note = L"Not an update: no " + missing.front();
+    } else {
+        ui.update.ok = true;
+        ui.update.note = L"Update found";
+    }
     ui.dlc.ok = dlc.empty() || fs::is_directory(fs::path(dlc), ec);
     ui.dlc.note = dlc.empty() ? L"Optional: none chosen" : ui.dlc.ok ? L"Folder found" : L"Folder not found";
     ui.save.ok = !save.empty();
     ui.save.note = !ui.save.ok                         ? L"Required"
                    : fs::is_directory(fs::path(save), ec) ? L"Folder found"
                                                         : L"Created when you install";
-    EnableWindow(ui.install, !ui.busy && ui.game.ok && ui.dlc.ok && ui.save.ok);
+    EnableWindow(ui.install, !ui.busy && ui.game.ok && ui.update.ok && ui.dlc.ok && ui.save.ok);
     InvalidateRect(ui.wnd, nullptr, FALSE);
     InvalidateRect(ui.install, nullptr, FALSE);
     InvalidateRect(ui.play, nullptr, FALSE);
@@ -435,11 +461,13 @@ void start_install() {
     if (ui.busy || !IsWindowEnabled(ui.install))
         return;
     std::wstring game = text_of(ui.game.edit), save = text_of(ui.save.edit), dlc = text_of(ui.dlc.edit);
+    std::wstring update = text_of(ui.update.edit);
     setup::Options opt;
     opt.root = ui.root;
     opt.game = game;
     opt.save = save;
     opt.dlc = dlc;
+    opt.update = update;
     opt.skip_intro = ui.skip;
     try {
         if (auto old = saves_to_move(opt.root, opt.save)) {
@@ -511,16 +539,17 @@ void add_folder(Folder& f, int edit_id, int browse_id) {
 }
 
 void create_controls() {
-    // Tab order: the three folders top to bottom, the intro box, then the buttons.
+    // Tab order: the four folders top to bottom, the intro box, then the buttons.
     add_folder(ui.game, kGameEdit, kGameBrowse);
+    add_folder(ui.update, kUpdateEdit, kUpdateBrowse);
     add_folder(ui.dlc, kDlcEdit, kDlcBrowse);
     add_folder(ui.save, kSaveEdit, kSaveBrowse);
     ui.skip_intro = add(WC_BUTTONW, L"Skip the intro logos (skip_intro=0 in settings.ini brings them back)",
-                        WS_TABSTOP | BS_OWNERDRAW, rect(kRowLeft + 4, 310, kRowRight - kRowLeft - 8, 30), kSkipIntro);
+                        WS_TABSTOP | BS_OWNERDRAW, rect(kRowLeft + 4, 390, kRowRight - kRowLeft - 8, 30), kSkipIntro);
     ui.play = add(WC_BUTTONW, L"Play Game", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 3 * 128 + 8, kButtonsTop, 120, 36), kPlay);
     ui.install = add(WC_BUTTONW, L"Install", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 2 * 128 + 8, kButtonsTop, 120, 36), IDOK);
     ui.exit = add(WC_BUTTONW, L"Exit", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 128 + 8, kButtonsTop, 120, 36), IDCANCEL);
-    ui.inputs = {ui.game.edit, ui.game.browse, ui.dlc.edit, ui.dlc.browse, ui.save.edit, ui.save.browse,
+    ui.inputs = {ui.game.edit, ui.game.browse, ui.update.edit, ui.update.browse, ui.dlc.edit, ui.dlc.browse, ui.save.edit, ui.save.browse,
                  ui.skip_intro, ui.exit};
 
     // Start from what the last install chose (paths.ini here, else the per-user copy), else an empty
@@ -533,6 +562,7 @@ void create_controls() {
     fs::path save = paths ? paths->save : setup::default_save();
     if (paths) {
         SetWindowTextW(ui.game.edit, paths->game.c_str());
+        SetWindowTextW(ui.update.edit, paths->update.c_str());
         SetWindowTextW(ui.dlc.edit, paths->dlc.c_str());
     }
     SetWindowTextW(ui.save.edit, save.c_str());
@@ -540,7 +570,7 @@ void create_controls() {
     ui.skip = setup::skip_intro(ui.root, save);
     set_status(setup::ready(ui.root) ? L"The game is set up. Press Play Game, or change the folders and press Install."
                : paths              ? L"This version isn't set up yet. Press Install."
-                                    : L"Choose your game dump (and a DLC folder if you have one), then press Install.");
+                                    : L"Choose your game dump (and its update and a DLC folder if you have them), then press Install.");
     set_busy(false);
 }
 
@@ -568,6 +598,13 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case kGameBrowse:
             browse(ui.game.edit, L"Select the game folder (the one with eboot.bin)");
+            // shadPS4 keeps the update next to the game as <game>-patch: take it when none is named.
+            if (text_of(ui.update.edit).empty())
+                if (fs::path update = setup::update_beside(text_of(ui.game.edit)); !update.empty())
+                    SetWindowTextW(ui.update.edit, update.c_str());
+            return 0;
+        case kUpdateBrowse:
+            browse(ui.update.edit, L"Select the game's update folder (the patch, with its own eboot.bin)");
             return 0;
         case kDlcBrowse:
             browse(ui.dlc.edit, L"Select your DLC folder (e.g. shadPS4's addcont)");

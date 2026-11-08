@@ -49,19 +49,9 @@ void runtime_game_identify(const char *title_id, const char *app_version, const 
            build ? "known build " : "a build the runner was not checked with",build ? build : "");
 }
 
-/* Deception's engine-specific hooks (frame rate, wide picture) are not written yet: the game runs
- * at its own rate and 16:9. */
+/* Deception's frame-rate hook is not written yet: the game runs at its own rate. */
 void runtime_game_set_image(unsigned char *image) { (void)image; }
 void runtime_game_frame_rate(void) {}
-uint32_t runtime_game_wide_width(const char *name, uint32_t width, uint32_t height, uint32_t width_4k) {
-    (void)name; (void)height; (void)width_4k;
-    return width;
-}
-int runtime_game_widen(unsigned char *image, uint32_t width_4k) {
-    (void)image; (void)width_4k;
-    puts("Wide: not supported for this game yet; the picture stays 16:9");
-    return 0;
-}
 
 /* DECEPTION_TRACE_CALLS=<offset>[,<offset>...] (hex guest offsets of `call rel32` instructions):
  * each call goes through a stub that logs the callee's return value (rax). A development aid for

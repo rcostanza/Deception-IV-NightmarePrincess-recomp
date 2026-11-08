@@ -50,13 +50,6 @@ void runtime_game_trace_calls(unsigned char *image);
 /* At each flip, on the game's thread (videoout, gnmdriver): settings.ini frame_rate onto the
  * engine's frame clock when they differ. */
 void runtime_game_frame_rate(void);
-/* A wider picture than 16:9 (width_4k = deception_width_4k(), above 3840): the engine's display
- * size table and the scene targets its render scripts create are widened to it. At load, before
- * the image is protected. 0, with a log line, when the image is not eboot 01.10 as expected. */
-int runtime_game_widen(unsigned char *image, uint32_t width_4k);
-/* The width a render script's target of width x height (named `name`) gets: 16:9 and 8:9
- * (checkerboard) sizes scale by width_4k/3840; the main menu's panels keep theirs. */
-uint32_t runtime_game_wide_width(const char *name, uint32_t width, uint32_t height, uint32_t width_4k);
 const char *runtime_import_name(const char *name);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
@@ -128,8 +121,6 @@ uintptr_t runtime_kernel_resolve(const char *name);
 void runtime_kernel_set_neo_mode(int enabled);
 /* 1 in PS4 Pro mode: set before the guest runs, so the direct memory pool can size itself from it. */
 int runtime_kernel_neo_mode(void);
-/* skip_intro's title screen press (runtime_pad.c): the AvPlayer reports title.mp4 starting (1) and
- * its player going away (0). */
 /* settings.ini skip_intro (runtime_intro.c): started before the game's code with the game folder;
  * told of reads of FILE_PS4/archive00.lnk; asks the pad for Cross while the notice is up. */
 void runtime_intro_start(const char *app0);
@@ -164,7 +155,6 @@ void *runtime_low_alloc(size_t size);
 void runtime_low_free(void *pointer);
 /* Windows: reserves the PS4 user address range as a placeholder (no-op elsewhere). */
 void runtime_memory_reserve(void);
-uintptr_t runtime_ajm_resolve(const char *name);
 uintptr_t runtime_audio_resolve(const char *name);
 void runtime_audio_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
