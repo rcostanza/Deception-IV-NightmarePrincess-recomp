@@ -1,0 +1,269 @@
+# Builds Deception's runner from source on Windows (MSYS2 CLANG64, as docs/building.md) and Linux,
+# runs the tests and packages each release (stripped, what players get), its symbols and the debug
+# release as the run's artifacts. linux-smoke unpacks the Linux release on other distros. A v* tag
+# publishes the two player packages as a GitHub release once every job has passed, with the tag's
+# section of CHANGELOG.md as its text (tools/release_notes.py).
+name: build
+
+on:
+  # Releases only: pushes to branches do not build.
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # python.org "Windows embeddable package (64-bit)", shipped in prepare/python.
+  PYTHON_EMBED: https://www.python.org/ftp/python/3.15.1/python-3.15.1-embed-amd64.zip
+  PYTHON_EMBED_SHA256: 352e232f25b5120508f11a6dfc1bd9076d3e70c30977d552a63338838c2ae8fb
+
+jobs:
+  # v* tags: the tag's section of CHANGELOG.md, checked at once rather than after the builds.
+  notes:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            CHANGELOG.md
+            tools/release_notes.py
+          sparse-checkout-cone-mode: false
+      - name: Release notes
+        run: python3 tools/release_notes.py "$GITHUB_REF_NAME"
+
+  windows:
+    runs-on: windows-latest
+    outputs:
+      release: ${{ steps.package.outputs.release }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # git describe names the release
+
+      # The runner's own MSYS2 at C:\msys64, where build.sh and package.py look.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          release: false
+          update: true
+          install: git patch make
+          pacboy: >-
+            toolchain:p cmake:p ninja:p pkgconf:p python:p
+            vulkan-headers:p vulkan-loader:p vulkan-memory-allocator:p glslang:p
+            sdl3:p fmt:p boost:p robin-map:p xxhash:p zlib:p zydis:p nasm:p
+            spirv-tools:p spirv-headers:p spirv-cross:p
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.15'
+
+      # The minimal FFmpeg (tools/build_ffmpeg.sh): rebuilt only when that script changes. Built and
+      # saved in steps of its own, so a later failure still keeps it; build.sh then finds its stamp.
+      - id: ffmpeg
+        uses: actions/cache/restore@v4
+        with:
+          path: out/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('tools/build_ffmpeg.sh') }}
+      - name: FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        # The CLANG64 clang and nasm, as build.sh puts them on PATH.
+        run: PATH="/c/msys64/clang64/bin:/c/msys64/usr/bin:$PATH" bash tools/build_ffmpeg.sh out/ffmpeg
+      - if: steps.ffmpeg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: out/ffmpeg
+          key: ${{ steps.ffmpeg.outputs.cache-primary-key }}
+
+      # A crashing test exits instead of waiting on a Windows Error Reporting dialog.
+      - name: No crash dialogs
+        shell: pwsh
+        run: |
+          $key = 'HKCU:\Software\Microsoft\Windows\Windows Error Reporting'
+          New-Item -Path $key -Force | Out-Null
+          Set-ItemProperty -Path $key -Name DontShowUI -Value 1 -Type DWord
+
+      # A hung test still fails here instead of stalling the job.
+      - name: Build and run the runtime tests
+        timeout-minutes: 60
+        run: bash build.sh --test
+
+      # The GPU tests write to out/<test>.log: the end of each, so a hang shows where it stopped.
+      - name: Test logs (failed run)
+        if: failure()
+        run: for f in out/*-test.log; do [[ -f $f ]] && { echo "== $f"; tail -n 15 "$f"; }; done; true
+
+      - name: Python tests
+        run: cd tests && python -m unittest discover -p "test_*.py"
+
+      - name: Embeddable Python
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/python-embed.zip" "$PYTHON_EMBED"
+          echo "$PYTHON_EMBED_SHA256  $RUNNER_TEMP/python-embed.zip" | sha256sum -c -
+
+      - name: Package
+        id: package
+        run: |
+          python tools/package.py --python "$RUNNER_TEMP/python-embed.zip" --zip
+          python tools/package.py --python "$RUNNER_TEMP/python-embed.zip" --zip --debug --out dist-debug
+          echo "RELEASE=$(cat dist/release.txt)" >> "$GITHUB_ENV"
+          echo "release=$(cat dist/release.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE }}
+          path: out/${{ env.RELEASE }}.zip
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE }}-debug
+          path: out/${{ env.RELEASE }}-debug.zip
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE }}-symbols
+          path: out/${{ env.RELEASE }}-symbols.zip
+          compression-level: 0
+
+  # Linux: built on Ubuntu 24.04 so it starts on glibc 2.39 or newer (SteamOS, Fedora/Bazzite,
+  # Debian 13, Ubuntu 24.04+). The release, debug and symbols tarballs are the run's artifacts.
+  linux:
+    runs-on: ubuntu-24.04
+    env:
+      SDL_AUDIO_DRIVER: dummy
+      CC: clang-18
+      CXX: clang++-18
+    outputs:
+      release: ${{ steps.package.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # git describe names the release
+
+      - name: Dependencies
+        run: bash .github/scripts/ci-deps.sh
+
+      # FFmpeg as on Windows: restored, or built (with CC=clang-18, as build.sh) and saved at once.
+      - id: ffmpeg
+        uses: actions/cache/restore@v4
+        with:
+          path: out/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('tools/build_ffmpeg.sh') }}
+      - name: FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: bash tools/build_ffmpeg.sh out/ffmpeg
+      - if: steps.ffmpeg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: out/ffmpeg
+          key: ${{ steps.ffmpeg.outputs.cache-primary-key }}
+
+      - name: Build and run the runtime tests
+        timeout-minutes: 60
+        run: bash build.sh --test
+
+      - name: Test logs (failed run)
+        if: failure()
+        run: for f in out/*-test.log; do [[ -f $f ]] && { echo "== $f"; tail -n 15 "$f"; }; done; true
+
+      - name: Every compile error (failed build)
+        if: failure()
+        run: ninja -C out/gpu -k 0 deception deception-setup 2>&1 | grep -E -A4 'error:|undefined reference' | head -400
+
+      - name: Python tests
+        run: cd tests && python3 -m unittest discover -p "test_*.py"
+
+      - name: Package
+        id: package
+        run: |
+          python3 tools/package.py --zip
+          python3 tools/package.py --zip --debug --out dist-debug
+          echo "RELEASE=$(cat dist/release.txt)" >> "$GITHUB_ENV"
+          echo "release=$(cat dist/release.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE }}-linux
+          path: out/${{ env.RELEASE }}-linux.tar.gz
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE }}-linux-debug
+          path: out/${{ env.RELEASE }}-linux-debug.tar.gz
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE }}-linux-symbols
+          path: out/${{ env.RELEASE }}-linux-symbols.tar.gz
+          compression-level: 0
+
+  # The unpacked Linux release on distros it was not built on: libraries, glibc, the setup and the
+  # paths.ini start (.github/scripts/smoke-test.sh; no game dump or GPU).
+  linux-smoke:
+    needs: linux
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # debian:13 has SteamOS 3.7's glibc (2.41), fedora:42 is Bazzite's base; ubuntu:24.04 without
+        # the build's packages.
+        image: ['ubuntu:24.04', 'debian:13', 'fedora:42', 'archlinux:latest']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.linux.outputs.release }}-linux
+          path: out
+      - name: ${{ matrix.image }}
+        run: |
+          mkdir -p unpacked && tar -xzf out/*-linux.tar.gz -C unpacked
+          docker run --rm -v "$PWD:/w" "${{ matrix.image }}" \
+            bash /w/.github/scripts/smoke-test.sh "/w/unpacked/${{ needs.linux.outputs.release }}"
+
+  # v* tags: the release, with what players download and nothing else (no symbols or debug builds).
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [notes, windows, linux, linux-smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            CHANGELOG.md
+            tools/release_notes.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.windows.outputs.release }}
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.linux.outputs.release }}-linux
+          path: out
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOWS: ${{ needs.windows.outputs.release }}
+          LINUX: ${{ needs.linux.outputs.release }}
+        # The tag's CHANGELOG.md section, then how to install.
+        run: |
+          {
+            python3 tools/release_notes.py "$GITHUB_REF_NAME"
+            echo
+            echo "## Install"
+            echo
+            echo "Windows: unzip ${WINDOWS}.zip and run deception-setup.exe. Linux: extract ${LINUX}-linux.tar.gz and run deception-setup. You need a decrypted dump of your own copy of Deception (CUSA00038, version 1.10); see README.txt."
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md "out/${WINDOWS}.zip" "out/${LINUX}-linux.tar.gz"

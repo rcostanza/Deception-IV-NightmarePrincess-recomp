@@ -1,0 +1,12 @@
+/.vscode
+__pycache__/
+/.claude/
+/.copilot/
+out/
+user/
+/*.ini
+!/settings.example.ini
+*.orig
+/*.spv
+dist/
+dist-*/

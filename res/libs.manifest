@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- libs\libs.manifest beside deception.exe: the private assembly its manifest depends on. This copy is
+     the build's and lists no files, so a development build finds its DLLs on PATH (run.py adds
+     MSYS2 CLANG64); tools/package.py writes the release's, which lists the DLLs in libs\. -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="libs" version="1.0.0.0" processorArchitecture="amd64"/>
+</assembly>

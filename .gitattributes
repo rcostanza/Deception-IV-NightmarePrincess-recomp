@@ -1,0 +1,4 @@
+# LF in every checkout, also with core.autocrlf=true (Git for Windows' default and GitHub's Windows
+# runners): bash cannot run build.sh or the tools with CRLF line endings. Binary files are detected.
+* text=auto eol=lf
+*.bat text eol=crlf

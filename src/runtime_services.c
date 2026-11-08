@@ -1,0 +1,1032 @@
+/* System services for an offline, single-user console:
+ *   - one local user (id 1) who is logged in but not signed in to PSN;
+ *   - network cable unplugged: NetCtl disconnected;
+ *   - common dialogs complete immediately (no UI is drawn yet);
+ *   - the whole package is installed (no disc map).
+ * Every entry here is an explicit contract; unknown functions still stop. */
+#define _GNU_SOURCE
+#include "runtime.h"
+#include "gpu/deception_gpu.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <time.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
+
+#define USER_ID 1
+#define USER_NAME "Player"
+#define ORBIS_OK 0
+#define USER_INVALID_ARGUMENT ((int32_t)0x80960005)
+#define USER_NO_EVENT ((int32_t)0x80960007)
+#define SYSTEM_NO_EVENT ((int32_t)0x80A10004)
+#define SYSTEM_PARAMETER ((int32_t)0x80A10003)
+#define NET_CTL_NOT_CONNECTED ((int32_t)0x80412108)
+#define NET_CTL_INVALID_ADDR ((int32_t)0x80412107)
+#define NP_SIGNED_OUT ((int32_t)0x80550006)
+#define NP_INVALID_ARGUMENT ((int32_t)0x80550003)
+#define NET_ENETUNREACH ((int32_t)0x80410133)
+#define NET_EINVAL ((int32_t)0x80410116)
+#define HTTP_NETWORK ((int32_t)0x80431063)
+#define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
+#define PLAYGO_BAD_HANDLE ((int32_t)0x80B20009)
+#define PLAYGO_BAD_POINTER ((int32_t)0x80B2000A)
+#define PLAYGO_BAD_SIZE ((int32_t)0x80B2000B)
+#define PLAYGO_BAD_CHUNK ((int32_t)0x80B2000C)
+#define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
+#define TROPHY_INVALID ((int32_t)0x80551604)
+
+static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+static int next_id=1;
+static int new_id(void) { pthread_mutex_lock(&lock); int id=next_id++; pthread_mutex_unlock(&lock); return id; }
+static void note(const char *what) { printf("Runtime: %s\n",what); }
+
+/* ---- UserService ---- */
+static int login_event_pending=1;
+static ABI int32_t user_initialize(const void *params) { (void)params; note("UserService initialized (user 1 logged in)"); return 0; }
+static ABI int32_t user_terminate(void) { return 0; }
+static ABI int32_t user_initial(int32_t *id) { if (!id) return USER_INVALID_ARGUMENT; *id=USER_ID; return 0; }
+static ABI int32_t user_list(int32_t *ids) {
+    if (!ids) return USER_INVALID_ARGUMENT;
+    ids[0]=USER_ID; ids[1]=ids[2]=ids[3]=-1; return 0;
+}
+static ABI int32_t user_name(int32_t id,char *name,uint64_t size) {
+    if (id!=USER_ID || !name) return USER_INVALID_ARGUMENT;
+    if (sizeof USER_NAME>size) return (int32_t)0x8096000a; /* BUFFER_TOO_SHORT */
+    strcpy(name,USER_NAME); return 0;
+}
+/* sceUserServiceGetUserColor(user, color): 0 blue, 1 red, 2 green, 3 pink. The one user is
+ * player 1, blue (shadPS4 keeps that 1-based, as its pad code reads it, but returns it raw). */
+static ABI int32_t user_color(int32_t id,int32_t *color) {
+    if (id!=USER_ID || !color) return USER_INVALID_ARGUMENT;
+    *color=0; return 0;
+}
+static ABI int32_t user_event(int32_t *event) {
+    if (!event) return USER_INVALID_ARGUMENT;
+    pthread_mutex_lock(&lock);
+    int pending=login_event_pending; login_event_pending=0;
+    pthread_mutex_unlock(&lock);
+    if (!pending) return USER_NO_EVENT;
+    event[0]=0; event[1]=USER_ID; /* LOGIN */
+    return 0;
+}
+
+/* ---- SystemService ---- */
+static int language(void) { const char *v=getenv("DECEPTION_LANGUAGE"); return v ? atoi(v) : 1; }
+static ABI int32_t system_param(int32_t id,int32_t *value) {
+    if (!value) return SYSTEM_PARAMETER;
+    switch (id) {
+    case 1: *value=language(); break;           /* language (1 = English US, 8 = Russian) */
+    case 2: *value=1; break;                    /* date format DD/MM/YYYY */
+    case 3: *value=1; break;                    /* 24-hour clock */
+#ifdef _WIN32
+    case 4: *value=(int32_t)(compat_utc_offset(time(NULL))/60); break;
+#else
+    case 4: { time_t now=time(NULL); struct tm t; localtime_r(&now,&t); *value=(int32_t)(t.tm_gmtoff/60); break; }
+#endif
+    case 5: *value=0; break;                    /* summer time */
+    case 7: *value=0; break;                    /* parental level off */
+    case 1000: *value=1; break;                 /* enter button: Cross */
+    default: fprintf(stderr,"STOP: unsupported system parameter %d\n",id); exit(21);
+    }
+    return 0;
+}
+static ABI int32_t system_status(unsigned char *status) {
+    if (!status) return SYSTEM_PARAMETER;
+    memset(status,0,12); /* event_num=0, no overlay, foreground, normal CPU mode */
+    return 0;
+}
+static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
+static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
+static ABI int32_t safe_area(float *info) { if (!info) return SYSTEM_PARAMETER; *info=1.0f; return 0; } /* full screen */
+static ABI int32_t disable_music_player(void) { return 0; }
+/* System-wide settings a PC has no equivalent for (music player, suspend dialog, the PS VR eye
+ * distance, the controller settings screen, power ticks, crash reports): accepted with OK and no
+ * effect, as shadPS4 does. */
+static ABI int32_t system_setting(void) { return 0; }
+
+/* ---- NetCtl / Net / Http / Ssl: no network ---- */
+static int32_t net_errno;
+static ABI int32_t *net_errno_loc(void) { return &net_errno; }
+static ABI int32_t net_pool_create(const char *name,int size,int flags) { (void)name; (void)size; (void)flags; return new_id(); }
+static ABI int32_t net_pool_destroy(int id) { (void)id; return 0; }
+static ABI int32_t net_unreachable(void) { net_errno=51; return NET_ENETUNREACH; }
+static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
+static ABI int32_t net_epoll_destroy(int id) { (void)id; return 0; }
+static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
+static ABI int32_t net_resolver_destroy(int id) { (void)id; return 0; }
+static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
+static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
+static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
+static ABI uint32_t net_ntohl(uint32_t v) { return ntohl(v); }
+static ABI int32_t net_pton(int af,const char *src,void *dst) {
+    if (af!=2) { net_errno=47; return NET_EINVAL; }
+    return inet_pton(AF_INET,src,dst);
+}
+static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) {
+    if (af!=2) { net_errno=47; return NULL; }
+    return inet_ntop(AF_INET,src,dst,size);
+}
+/* sceNetGetSockInfo(s, info, n, flags) (shadPS4 net.cpp): no socket exists. With no info and
+ * s < 0 it counts them (0); one socket s is EBADF; a list fills none. */
+#define NET_EBADF ((int32_t)0x80410109)
+static ABI int32_t net_sock_info(int32_t s,void *info,int32_t n,int32_t flags) {
+    (void)flags;
+    if (!info) { if (s<0) return 0; net_errno=22; return NET_EINVAL; }
+    if (n<=0) { net_errno=22; return NET_EINVAL; }
+    if (s>=0) { net_errno=9; return NET_EBADF; }
+    return 0;
+}
+static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
+static ABI int32_t netctl_info(int code,void *info) { (void)code; (void)info; return NET_CTL_NOT_CONNECTED; }
+static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)cb; (void)arg; if (!cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
+static ABI int32_t netctl_check(void) { return 0; }
+static ABI int32_t netctl_unregister(int cid) { (void)cid; return 0; }
+static ABI int32_t netctl_nat(uint32_t *info) {
+    if (!info) return NET_CTL_INVALID_ADDR;
+    info[1]=0; info[2]=3; info[3]=0; /* stun failed, NAT type 3, no mapped address */
+    return 0;
+}
+static ABI int32_t lib_init_id(void) { return new_id(); }
+static ABI int32_t ok_void(void) { return 0; }
+static ABI int32_t http_fail(void) { return HTTP_NETWORK; }
+/* Objects are created so setup code proceeds; any transfer fails as unplugged. */
+static ABI int32_t http_object(void) { return new_id(); }
+
+/* ---- NP (PSN): signed out ---- */
+static ABI int32_t np_state(int32_t user,int32_t *state) {
+    if (!state) return NP_INVALID_ARGUMENT;
+    (void)user; *state=1; /* SIGNED_OUT */
+    return 0;
+}
+static ABI int32_t np_signed_out(void) { return NP_SIGNED_OUT; }
+static ABI int32_t np_register(void *cb,void *arg) { (void)cb; (void)arg; return new_id(); }
+static ABI int32_t np_request(const void *param) { (void)param; return new_id(); }
+/* NpManager requests (shadPS4 np_manager.cpp): ids 0x20000001 up, at most 32 live. A call that
+ * takes a request completes it at once with the signed-out result; a synchronous request returns
+ * that result, an asynchronous one returns 0 and reports it through sceNpPollAsync/sceNpWaitAsync.
+ * A completed request cannot be used again (INVALID_ARGUMENT), an aborted one fails with ABORTED. */
+#define NP_REQUEST_MAX ((int32_t)0x80550013)
+#define NP_REQUEST_NOT_FOUND ((int32_t)0x80550014)
+#define NP_INVALID_ID ((int32_t)0x80550015)
+#define NP_ABORTED ((int32_t)0x80550012)
+#define NP_INVALID_SIZE ((int32_t)0x80550011)
+enum { NP_FREE, NP_READY, NP_COMPLETE, NP_ABORT };
+static struct { int state, async; int32_t result; } np_requests[32];
+static int np_live;
+static int32_t np_create(int async) {
+    pthread_mutex_lock(&lock);
+    int i=0;
+    while (i<32 && np_requests[i].state!=NP_FREE) ++i;
+    if (np_live==32 || i==32) { pthread_mutex_unlock(&lock); return NP_REQUEST_MAX; }
+    np_requests[i].state=NP_READY; np_requests[i].async=async; np_requests[i].result=0; ++np_live;
+    pthread_mutex_unlock(&lock);
+    return 0x20000001+i;
+}
+/* Index of a live request, or -1; call with lock held. */
+static int np_index(int32_t id) {
+    int i=id-0x20000001;
+    return i>=0 && i<32 && np_requests[i].state!=NP_FREE ? i : -1;
+}
+static int32_t np_complete(int32_t id,int32_t result) {
+    pthread_mutex_lock(&lock);
+    int i=id ? np_index(id) : -1;
+    int32_t r=!id ? NP_INVALID_ARGUMENT : i<0 ? NP_REQUEST_NOT_FOUND : 0;
+    if (!r && np_requests[i].state==NP_COMPLETE) r=np_requests[i].result=NP_INVALID_ARGUMENT;
+    else if (!r && np_requests[i].state==NP_ABORT) r=np_requests[i].result=NP_ABORTED;
+    else if (!r) { np_requests[i].state=NP_COMPLETE; np_requests[i].result=result; r=np_requests[i].async ? 0 : result; }
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+static ABI int32_t np_create_async(const uint64_t *param) {
+    if (!param) return NP_INVALID_ARGUMENT;
+    if (param[0]!=24) return NP_INVALID_SIZE; /* size, cpu_affinity_mask, thread_priority */
+    return np_create(1);
+}
+static ABI int32_t np_delete_request(int32_t id) {
+    pthread_mutex_lock(&lock);
+    int i=np_index(id);
+    if (i>=0) { np_requests[i].state=NP_FREE; --np_live; }
+    pthread_mutex_unlock(&lock);
+    return i<0 ? NP_REQUEST_NOT_FOUND : 0;
+}
+static ABI int32_t np_abort_request(int32_t id) {
+    pthread_mutex_lock(&lock);
+    int i=np_index(id);
+    if (i>=0 && np_requests[i].state!=NP_COMPLETE) np_requests[i].state=NP_ABORT;
+    pthread_mutex_unlock(&lock);
+    return i<0 ? NP_REQUEST_NOT_FOUND : 0;
+}
+/* sceNpPollAsync and sceNpWaitAsync: nothing is in flight, so both report the stored result. */
+static ABI int32_t np_poll_request(int32_t id,int32_t *result) {
+    if (!result) return NP_INVALID_ARGUMENT;
+    pthread_mutex_lock(&lock);
+    int i=np_index(id);
+    int32_t r=i<0 ? NP_REQUEST_NOT_FOUND : !np_requests[i].async || np_requests[i].state==NP_READY ? NP_INVALID_ID : 0;
+    if (!r) *result=np_requests[i].result;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+/* sceNpCheckNpAvailabilityA(request, user), sceNpGetParentalControlInfoA(request, user, age, info). */
+static ABI int32_t np_availability(int32_t id,int32_t user) {
+    return user==-1 ? NP_INVALID_ARGUMENT : np_complete(id,NP_SIGNED_OUT);
+}
+static ABI int32_t np_parental(int32_t id,int32_t user,int8_t *age,void *info) {
+    return !age || !info || user==-1 ? NP_INVALID_ARGUMENT : np_complete(id,NP_SIGNED_OUT);
+}
+/* sceNpGetAccountIdA(user, account): the user's PSN account, kept by the console while PSN is out
+ * of reach (sceNpGetState stays signed out). sceNpGetUserIdByAccountId: that account is the one
+ * user. */
+#define NP_ACCOUNT_ID 0x5253474E00000001ull /* "RSGN" */
+#define NP_USER_NOT_FOUND ((int32_t)0x80550007)
+static ABI int32_t np_account_id(int32_t user,uint64_t *account) {
+    if (!account || user==-1) return NP_INVALID_ARGUMENT;
+    if (user!=USER_ID) { *account=0; return NP_USER_NOT_FOUND; }
+    *account=NP_ACCOUNT_ID; return 0;
+}
+
+/* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
+typedef struct { const char *name; int initialized, status; uint32_t button; } Dialog;
+static Dialog dialogs[]={{"CommonDialog",0,0,0},{"MsgDialog",0,0,0},{"SaveDataDialog",0,0,0},
+                         {"NpProfileDialog",0,0,0},{"NpCommerceDialog",0,0,0},{"ImeDialog",0,0,0}};
+#define DIALOG_RUNNING 2
+#define DIALOG_FINISHED 3
+#define DIALOG_NOT_FINISHED ((int32_t)0x80B80005)
+#define DIALOG_PARAM_INVALID ((int32_t)0x80B8000A)
+#define DIALOG_NOT_RUNNING ((int32_t)0x80B8000B)
+#define DIALOG_ARG_NULL ((int32_t)0x80B8000D)
+#define DIALOG_NOT_SUPPORTED ((int32_t)0x80B8000F)
+/* sceCommonDialogInitialize: once per process; again reports ALREADY_SYSTEM_INITIALIZED. */
+static int common_initialized;
+static ABI int32_t common_init(void) {
+    if (common_initialized) return (int32_t)0x80B80002;
+    common_initialized=1;
+    deception_gpu_common_dialog_initialized();
+    return 0;
+}
+static int32_t dialog_init(int i) {
+    if (dialogs[i].initialized) return (int32_t)0x80B80004;
+    dialogs[i].initialized=1; dialogs[i].status=1; return 0;
+}
+static int32_t dialog_open(int i) {
+    if (!dialogs[i].initialized) return DIALOG_NOT_INITIALIZED;
+    printf("Runtime: %s opened; completed immediately (no dialog UI yet)\n",dialogs[i].name);
+    dialogs[i].status=DIALOG_FINISHED; dialogs[i].button=1; return 0; /* OK / YES */
+}
+/* A progress bar shows the game's own work: it runs until the game closes it. */
+static int32_t dialog_open_progress(int i) {
+    if (!dialogs[i].initialized) return DIALOG_NOT_INITIALIZED;
+    printf("Runtime: %s progress bar opened (runs until closed)\n",dialogs[i].name);
+    dialogs[i].status=DIALOG_RUNNING; dialogs[i].button=0; return 0;
+}
+static int32_t dialog_close(int i) {
+    if (dialogs[i].status!=DIALOG_RUNNING) return DIALOG_NOT_RUNNING;
+    dialogs[i].status=DIALOG_FINISHED; return 0;
+}
+/* Result: result (OK), button, reserved; SaveDataDialog's begins with the mode. */
+static int32_t dialog_result(int i, unsigned char *out, size_t offset) {
+    if (dialogs[i].status!=DIALOG_FINISHED) return DIALOG_NOT_FINISHED;
+    if (!out) return DIALOG_ARG_NULL;
+    uint32_t values[2]={0,dialogs[i].button};
+    memcpy(out+offset,values,8);
+    return 0;
+}
+static int32_t dialog_status(int i) { return dialogs[i].status; }
+static int32_t dialog_term(int i) {
+    if (!dialogs[i].initialized) return DIALOG_NOT_INITIALIZED;
+    dialogs[i].initialized=0; dialogs[i].status=0; return 0;
+}
+#define DIALOG(tag,i) \
+    static ABI int32_t tag##_init(void) { return dialog_init(i); } \
+    static ABI int32_t tag##_open(const void *p) { (void)p; return dialog_open(i); } \
+    static ABI int32_t tag##_status(void) { return dialog_status(i); } \
+    static ABI int32_t tag##_term(void) { return dialog_term(i); }
+DIALOG(commerce,4)
+/* sceNpCommerceDialogClose: only a running dialog closes; an opened one has already finished. */
+static ABI int32_t commerce_close(void) { return dialog_close(4); }
+/* sceImeDialogGetPanelSize(param, width, height): the PS4's keyboard panel, 793x408 at 1080p;
+ * nothing is drawn (text is typed into the game window), the game only places things by it. */
+static ABI int32_t ime_panel_size(const void *param,uint32_t *width,uint32_t *height) {
+    if (!param || !width || !height) return (int32_t)0x80BC0004; /* IME INVALID_ADDRESS, as sceImeDialogInit */
+    *width=793; *height=408; return 0;
+}
+/* OrbisMsgDialogParam: BaseParam (48 bytes), size, mode (2 = progress bar).
+ * OrbisSaveDataDialogParam: BaseParam, int32 size, mode (5 = progress bar). */
+static int32_t dialog_open_mode(int i, const unsigned char *param, size_t mode_offset, uint32_t progress_mode) {
+    if (!param) return DIALOG_ARG_NULL;
+    uint32_t mode; memcpy(&mode,param+mode_offset,4);
+    return mode==progress_mode ? dialog_open_progress(i) : dialog_open(i);
+}
+static ABI int32_t msg_init(void) { return dialog_init(1); }
+static ABI int32_t msg_open(const unsigned char *p) { return dialog_open_mode(1,p,56,2); }
+static ABI int32_t msg_status(void) { return dialog_status(1); }
+static ABI int32_t msg_term(void) { return dialog_term(1); }
+static ABI int32_t msg_close(void) { return dialog_close(1); }
+static ABI int32_t msg_result(unsigned char *out) { return dialog_result(1,out,0); }
+/* SaveDataDialog. OrbisSaveDataDialogParam: BaseParam (48), size, mode @52, dispType @56,
+ * animParam @64, items @72, ..., userData @112. SaveDialogItems: userId @0, titleId @8,
+ * dirName @16 (32-byte names), dirNameNum @24, newItem @32 (title @0, icon @8, size @16), focusPos @40.
+ * A list (mode 1) is shown for the player to choose; every other mode answers for the
+ * first listed save. The result names the chosen save ("" = the new item). */
+#define SAVE_MODE_LIST 1
+#define SAVE_RESULT_CANCELED 1
+static struct {
+    uint32_t mode, result, type;
+    void *user_data;
+    char dirs[32][32];
+    int dir_count, has_new, choosing, selected;
+    unsigned char *new_icon;
+    uint64_t new_icon_size;
+} save_dialog;
+static char save_labels[33][2700], save_icons[33][720], save_question[2800];
+static const char *save_text(const char *english, const char *portuguese) {
+    const char *ui=getenv("DECEPTION_UI_LANGUAGE");
+    int pt=ui && *ui ? !strncmp(ui,"pt",2) : language()==7 || language()==17;
+    return pt ? portuguese : english;
+}
+/* Older saves contain single-byte accents; keep valid UTF-8 and convert legacy bytes. */
+static void save_utf8(char *out, size_t size, const unsigned char *in, size_t limit) {
+    size_t n=0;
+    for (size_t i=0;i<limit && in[i] && n+4<size;) {
+        uint32_t c=in[i];
+        if (c>=0xC2 && c<=0xF4) {
+            size_t want=c<0xE0 ? 2 : c<0xF0 ? 3 : 4;
+            uint32_t value=c & (want==2 ? 31 : want==3 ? 15 : 7);
+            size_t k=1;
+            while (k<want && i+k<limit && (in[i+k]&0xC0)==0x80)
+                value=(value<<6)|(in[i+k++]&63);
+            if (k==want && value>=(want==2 ? 0x80u : want==3 ? 0x800u : 0x10000u) &&
+                value<=0x10FFFF && !(value>=0xD800 && value<=0xDFFF)) {
+                memcpy(out+n,in+i,want); n+=want; i+=want; continue;
+            }
+        }
+        if ((c<32 && c!='\n') || (c>=0x7F && c<0xA0)) c='?';
+        if (c<0x80) out[n++]=(char)c;
+        else { out[n++]=(char)(0xC0|(c>>6)); out[n++]=(char)(0x80|(c&63)); }
+        ++i;
+    }
+    out[n]=0;
+}
+/* Last-modified time (seconds) of a save; 0 when unavailable. */
+static int64_t save_mtime(const char *dir) {
+    if (!dir || !*dir) return 0;
+    int64_t t=runtime_savedata_mtime(USER_ID,dir);
+    if (t>0) return t;
+    unsigned char param[RUNTIME_SAVE_PARAM_SIZE];
+    if (runtime_savedata_param(USER_ID,dir,param)==0) {
+        memcpy(&t,param+1288,8);
+        if (t>0) return t;
+    }
+    return 0;
+}
+/* A save's row: its title (or folder name), subtitle and detail when it has them, and when it was
+ * written. Compact (the overwrite question): the subtitle or title, the date and the detail. */
+static void save_label(char *out, size_t size, const char *dir, int compact) {
+    unsigned char param[RUNTIME_SAVE_PARAM_SIZE];
+    if (runtime_savedata_param(USER_ID,dir,param)) {
+        const char *unknown=save_text("Details unavailable","Detalhes indisponÃƒÂ­veis");
+        if (compact) snprintf(out,size,"%s",unknown);
+        else snprintf(out,size,"%s\n%s",dir,unknown);
+        return;
+    }
+    int64_t mtime=save_mtime(dir);
+    if (mtime<=0) memcpy(&mtime,param+1288,8);
+    time_t t=(time_t)mtime; struct tm tm;
+#ifdef _WIN32
+    int dated=mtime>0 && localtime_s(&tm,&t)==0;
+#else
+    int dated=mtime>0 && localtime_r(&t,&tm)!=NULL;
+#endif
+    char when[32]="";
+    if (dated && !strftime(when,sizeof(when),"%Y-%m-%d %H:%M",&tm)) when[0]=0;
+    if (!when[0]) snprintf(when,sizeof(when),"%s",save_text("Date unavailable","Data indisponÃƒÂ­vel"));
+    char title[257], subtitle[257], detail[2049];
+    save_utf8(title,sizeof(title),param,128);
+    save_utf8(subtitle,sizeof(subtitle),param+128,128);
+    save_utf8(detail,sizeof(detail),param+256,1024);
+    const char *name=title[0] ? title : dir;
+    if (compact) snprintf(out,size,"%s\n%s%s%s",subtitle[0] ? subtitle : name,when,detail[0] ? "\n" : "",detail);
+    else snprintf(out,size,"%s\n%s%s%s%s%s",name,subtitle,subtitle[0] ? "\n" : "",when,detail[0] ? "\n" : "",detail);
+}
+static void save_show_list(int focus) {
+    const char *labels[33], *icons[33]; int n=0;
+    if (save_dialog.has_new) {
+        snprintf(save_labels[n],sizeof(save_labels[n]),"%s",save_text("New save","Novo save"));
+        labels[n]=save_labels[n]; icons[n]=NULL; ++n;
+    }
+    for (int i=0;i<save_dialog.dir_count;++i) {
+        save_label(save_labels[n],sizeof(save_labels[n]),save_dialog.dirs[i],0); labels[n]=save_labels[n];
+        icons[n]=runtime_savedata_icon(USER_ID,save_dialog.dirs[i],save_icons[n],sizeof(save_icons[n])) ? NULL : save_icons[n];
+        ++n;
+    }
+    const char *title=save_dialog.type==1 ? save_text("Save game","Salvar jogo")
+                      : save_dialog.type==2 ? save_text("Load game","Carregar jogo") : save_text("Delete save","Excluir save");
+    save_dialog.choosing=n && deception_gpu_choice_begin(title,labels,icons,n,focus) ? 1 : 0;
+    if (!save_dialog.choosing) {
+        save_dialog.result=SAVE_RESULT_CANCELED;
+        dialogs[2].status=DIALOG_FINISHED; dialogs[2].button=0;
+    } else dialogs[2].status=DIALOG_RUNNING;
+}
+static ABI int32_t save_init(void) { return dialog_init(2); }
+typedef struct { char name[32]; int64_t mtime; } SaveSortEntry;
+/* Newest first; deterministic tie-breaking by name for equal timestamps.
+ * Missing and invalid timestamps (mtime <= 0) form a single category at the bottom. */
+static int save_sort_compare(const void *a, const void *b) {
+    const SaveSortEntry *x=(const SaveSortEntry *)a;
+    const SaveSortEntry *y=(const SaveSortEntry *)b;
+    int x_valid=x->mtime>0, y_valid=y->mtime>0;
+    if (x_valid!=y_valid) return x_valid ? -1 : 1;
+    if (!x_valid) return strcmp(x->name,y->name);
+    if (x->mtime!=y->mtime) return x->mtime>y->mtime ? -1 : 1;
+    return strcmp(x->name,y->name);
+}
+static void save_sort_dirs(void) {
+    if (save_dialog.dir_count<=1) return;
+    SaveSortEntry entries[32];
+    for (int i=0;i<save_dialog.dir_count;++i) {
+        memcpy(entries[i].name,save_dialog.dirs[i],32);
+        entries[i].name[31]=0;
+        entries[i].mtime=save_mtime(entries[i].name);
+    }
+    qsort(entries,(size_t)save_dialog.dir_count,sizeof(SaveSortEntry),save_sort_compare);
+    for (int i=0;i<save_dialog.dir_count;++i) memcpy(save_dialog.dirs[i],entries[i].name,32);
+}
+static ABI int32_t save_open(const unsigned char *p) {
+    if (!p) return DIALOG_ARG_NULL;
+    if (!dialogs[2].initialized) return DIALOG_NOT_INITIALIZED;
+    free(save_dialog.new_icon);
+    memset(&save_dialog,0,sizeof(save_dialog));
+    memcpy(&save_dialog.mode,p+52,4);
+    memcpy(&save_dialog.type,p+56,4);
+    memcpy(&save_dialog.user_data,p+112,8);
+    const unsigned char *items; memcpy(&items,p+72,8);
+    if (items) {
+        const char *dirs; uint32_t count; const void *new_item;
+        memcpy(&dirs,items+16,8); memcpy(&count,items+24,4); memcpy(&new_item,items+32,8);
+        for (uint32_t i=0;dirs && i<count && save_dialog.dir_count<32;++i)
+            if (dirs[i*32]) memcpy(save_dialog.dirs[save_dialog.dir_count++],dirs+i*32,31);
+        save_dialog.has_new=new_item!=NULL;
+        if (new_item && save_dialog.mode==SAVE_MODE_LIST && save_dialog.type==1) {
+            const unsigned char *icon; uint64_t size;
+            memcpy(&icon,(const unsigned char *)new_item+8,8);
+            memcpy(&size,(const unsigned char *)new_item+16,8);
+            if (icon && size && size<=4u*1024u*1024u) {
+                save_dialog.new_icon=malloc((size_t)size);
+                if (save_dialog.new_icon) {
+                    memcpy(save_dialog.new_icon,icon,(size_t)size);
+                    save_dialog.new_icon_size=size;
+                }
+            }
+        }
+    }
+    if (save_dialog.mode!=SAVE_MODE_LIST) return dialog_open_mode(2,p,52,5);
+    save_sort_dirs();
+    save_show_list(0);
+    return 0;
+}
+static ABI int32_t save_status(void) {
+    if (save_dialog.choosing) {
+        int choice=deception_gpu_choice_poll();
+        if (choice!=-1) {
+            if (save_dialog.choosing==2) {
+                if (choice!=0) { save_show_list(save_dialog.selected); return dialog_status(2); }
+                choice=save_dialog.selected;
+            } else if (choice>=save_dialog.has_new && choice<save_dialog.dir_count+save_dialog.has_new && save_dialog.type==1) {
+                save_dialog.selected=choice;
+                int dir=choice-save_dialog.has_new;
+                char metadata[2700];
+                save_label(metadata,sizeof(metadata),save_dialog.dirs[dir],1);
+                snprintf(save_question,sizeof(save_question),"%s\n\n%s",
+                         save_text("Overwrite this save?","Sobrescrever este save?"),
+                         metadata);
+                const char *options[]={save_text("Overwrite","Sobrescrever"),save_text("Cancel","Cancelar")};
+                if (deception_gpu_choice_confirm(save_question,options,2,1,save_dialog.new_icon,save_dialog.new_icon_size,
+                                                 save_text("New save","Novo save"),save_text("Preview unavailable","PrÃƒÂ©via indisponÃƒÂ­vel"))) {
+                    save_dialog.choosing=2; return dialog_status(2);
+                }
+                choice=-2;
+            }
+            if (choice>=save_dialog.dir_count+save_dialog.has_new) choice=-2;
+            save_dialog.choosing=0;
+            dialogs[2].status=DIALOG_FINISHED;
+            if (choice<0) { save_dialog.result=SAVE_RESULT_CANCELED; dialogs[2].button=0; }
+            else {
+                int dir=choice-save_dialog.has_new;
+                /* The chosen save goes first; the new item has no name. */
+                if (dir>=0) memcpy(save_dialog.dirs[0],save_dialog.dirs[dir],32);
+                else save_dialog.dirs[0][0]=0;
+                save_dialog.dir_count=dir>=0 || save_dialog.dir_count ? 1 : 0;
+                dialogs[2].button=1;
+            }
+            printf("Runtime: SaveDataDialog list: %s%s\n",choice<0 ? "cancelled" : "chose ",
+                   choice<0 ? "" : save_dialog.dirs[0][0] ? save_dialog.dirs[0] : "new save");
+        }
+    }
+    return dialog_status(2);
+}
+static void save_release_icon(void) {
+    free(save_dialog.new_icon); save_dialog.new_icon=NULL; save_dialog.new_icon_size=0;
+}
+static ABI int32_t save_term(void) { save_release_icon(); save_dialog.choosing=0; return dialog_term(2); }
+static ABI int32_t save_close(void) { save_release_icon(); save_dialog.choosing=0; return dialog_close(2); }
+/* OrbisSaveDataDialogResult: mode, result, buttonId, dirName* @16, param* @24, userData @32. */
+static ABI int32_t save_result(unsigned char *out) {
+    int32_t r=dialog_result(2,out,4);
+    if (r) return r;
+    memcpy(out,&save_dialog.mode,4);
+    memcpy(out+4,&save_dialog.result,4);
+    char *dir; unsigned char *param;
+    memcpy(&dir,out+16,8); memcpy(&param,out+24,8);
+    const char *name=save_dialog.dir_count && !save_dialog.result ? save_dialog.dirs[0] : "";
+    if (dir) { memset(dir,0,32); memcpy(dir,name,strnlen(name,31)); }
+    if (param && name[0]) runtime_savedata_param(USER_ID,name,param);
+    memcpy(out+32,&save_dialog.user_data,8);
+    return 0;
+}
+/* sceNpCommerceDialogGetResult(result{int32 result, bool authorized, userData}): the Store cannot
+ * be reached offline, so the player leaves it having bought nothing (USER_CANCELED). */
+static ABI int32_t commerce_result(unsigned char *result) {
+    int32_t r=dialog_result(4,result,0);
+    if (r) return r;
+    const int32_t canceled=1;
+    memcpy(result,&canceled,4); result[4]=0;
+    return 0;
+}
+/* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
+ * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
+ * option, max length, char16 buffer, position, alignment, placeholder, title. */
+typedef struct {
+    int32_t user; uint32_t type; uint64_t languages; uint32_t enter_label, input_method;
+    void *filter; uint32_t option, max_length; uint16_t *buffer;
+    float x, y; uint32_t halign, valign; const uint16_t *placeholder, *title; int8_t reserved[16];
+} ImeParam;
+static struct { int running, finished, end_status; uint16_t *buffer; uint32_t max_length; } ime;
+static size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
+    size_t n=0;
+    for (size_t i=0; in && i<limit && in[i] && n+4<size; ++i) {
+        uint32_t c=in[i];
+        if (c>=0xD800 && c<0xDC00 && i+1<limit && in[i+1]>=0xDC00 && in[i+1]<0xE000) { c=0x10000+((c-0xD800)<<10)+(in[i+1]-0xDC00); ++i; }
+        if (c<0x80) out[n++]=(char)c;
+        else if (c<0x800) { out[n++]=(char)(0xC0|c>>6); out[n++]=(char)(0x80|(c&63)); }
+        else if (c<0x10000) { out[n++]=(char)(0xE0|c>>12); out[n++]=(char)(0x80|((c>>6)&63)); out[n++]=(char)(0x80|(c&63)); }
+        else { out[n++]=(char)(0xF0|c>>18); out[n++]=(char)(0x80|((c>>12)&63)); out[n++]=(char)(0x80|((c>>6)&63)); out[n++]=(char)(0x80|(c&63)); }
+    }
+    out[n]=0; return n;
+}
+static void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
+    uint32_t n=0;
+    for (const unsigned char *p=(const unsigned char *)in; *p && n<max;) {
+        uint32_t c; int extra;
+        if (*p<0x80) { c=*p; extra=0; } else if ((*p&0xE0)==0xC0) { c=*p&31; extra=1; }
+        else if ((*p&0xF0)==0xE0) { c=*p&15; extra=2; } else { c=*p&7; extra=3; }
+        ++p;
+        for (int k=0;k<extra && (*p&0xC0)==0x80;++k) c=(c<<6)|(*p++&63);
+        if (c>=0x10000) { if (n+2>max) break; c-=0x10000; out[n++]=(uint16_t)(0xD800+(c>>10)); out[n++]=(uint16_t)(0xDC00+(c&1023)); }
+        else out[n++]=(uint16_t)c;
+    }
+    out[n<max ? n : max]=0;
+}
+static void ime_complete(int end_status, const char *text) {
+    if (!end_status && ime.buffer && ime.max_length) utf8_to_utf16(text,ime.buffer,ime.max_length);
+    ime.end_status=end_status; ime.finished=1; ime.running=0;
+    printf("Runtime: ImeDialog %s%s%s\n",end_status ? "cancelled" : "text: ",end_status ? "" : text,"");
+}
+static ABI int32_t ime_init(const ImeParam *param, const void *extended) {
+    (void)extended;
+    if (!param || !param->buffer || !param->max_length) return (int32_t)0x80BC0004; /* IME INVALID_ADDRESS */
+    if (ime.running) return (int32_t)0x80BC0003;                                  /* BUSY */
+    memset(&ime,0,sizeof(ime));
+    ime.buffer=param->buffer; ime.max_length=param->max_length; ime.running=1;
+    char initial[512], prompt[256];
+    utf16_to_utf8(param->buffer,param->max_length,initial,sizeof(initial));
+    utf16_to_utf8(param->title,128,prompt,sizeof(prompt));
+    const char *preset=getenv("DECEPTION_IME_TEXT");
+    if (preset) { ime_complete(0,preset); return 0; }
+    /* An empty field starts with the user name: a controller alone can accept it (the port
+     * has no on-screen keyboard). */
+    const char *start=initial[0] ? initial : USER_NAME;
+    if (!deception_gpu_text_input_begin(start,prompt[0] ? prompt : "Text")) ime_complete(0,start);
+    else printf("Runtime: ImeDialog opened: shown on screen; keyboard Enter or Cross accepts, Esc or Circle cancels\n");
+    return 0;
+}
+static ABI int32_t ime_status(void) {
+    if (ime.running) {
+        char text[512];
+        int state=deception_gpu_text_input_poll(text,sizeof(text));
+        if (state) ime_complete(state==1 ? 0 : 1,text);
+    }
+    return ime.running ? 1 : ime.finished ? 2 : 0; /* Running / Finished / None */
+}
+static ABI int32_t ime_result(uint32_t *result) {
+    if (!ime.finished) return (int32_t)0x80BC0101; /* DIALOG NOT_FINISHED */
+    if (result) *result=(uint32_t)ime.end_status;
+    return 0;
+}
+static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* sceImeDialogAbort: a running dialog finishes with ABORTED (2) and its text unchanged. */
+static ABI int32_t ime_abort(void) {
+    if (!ime.running) return (int32_t)0x80BC0105; /* NOT_RUNNING */
+    ime_complete(2,"");
+    return 0;
+}
+/* sceSaveDataDialogIsReadyToDisplay: the overlay can always draw. */
+static ABI int32_t save_ready(void) { return 1; }
+/* sceSaveDataDialogProgressBarSetValue(target, rate): the list dialog shows no progress bar. */
+static ABI int32_t save_progress(int32_t target, uint32_t rate) { (void)target; (void)rate; return 0; }
+/* sceNetCtlGetResult(eventType, *errorCode): the error behind a disconnection event; none. */
+static ABI int32_t netctl_result(int32_t event, int32_t *error) {
+    (void)event;
+    if (!error) return NET_CTL_INVALID_ADDR;
+    *error=0; return 0;
+}
+
+/* ---- IME USB keyboard (shadPS4 ime.cpp): opens, but no keyboard is ever connected ----
+ * sceImeKeyboardOpen(user, param{option, reserved1[4], arg, handler, reserved2[8]}) checks the
+ * param (option bits 0x3f, zeroed reserved fields), one open at a time. No keyboard events are
+ * sent; sceImeKeyboardGetResourceId reports CONNECTION_FAILED with no resources. */
+#define IME_BUSY ((int32_t)0x80BC0001)
+#define IME_NOT_OPENED ((int32_t)0x80BC0002)
+#define IME_CONNECTION_FAILED ((int32_t)0x80BC0004)
+#define IME_INVALID_USER_ID ((int32_t)0x80BC0010)
+#define IME_INVALID_OPTION ((int32_t)0x80BC0015)
+#define IME_INVALID_HANDLER ((int32_t)0x80BC0022)
+#define IME_INVALID_ADDRESS ((int32_t)0x80BC0031)
+#define IME_INVALID_RESERVED ((int32_t)0x80BC0032)
+typedef struct { uint32_t option; int8_t reserved1[4]; void *arg; void *handler; int8_t reserved2[8]; } ImeKeyboardParam;
+static int keyboard_open;
+static ABI int32_t keyboard_open_call(int32_t user,const ImeKeyboardParam *param) {
+    if (!param) return IME_INVALID_ADDRESS;
+    if (!param->handler) return IME_INVALID_HANDLER;
+    if (param->option & ~0x3fu) return IME_INVALID_OPTION;
+    if (user==-1) return IME_INVALID_USER_ID;
+    static const int8_t zero[8];
+    if (memcmp(param->reserved1,zero,4) || memcmp(param->reserved2,zero,8)) return IME_INVALID_RESERVED;
+    if (keyboard_open) return IME_BUSY;
+    keyboard_open=1; return 0;
+}
+static ABI int32_t keyboard_close(int32_t user) {
+    if (!keyboard_open) return IME_NOT_OPENED;
+    if (user==-1) return IME_INVALID_USER_ID;
+    keyboard_open=0; return 0;
+}
+/* sceImeUpdate(handler): the keyboard has no events; NOT_OPENED with neither it nor an IME open. */
+static ABI int32_t ime_update(void *handler) { (void)handler; return keyboard_open ? 0 : IME_NOT_OPENED; }
+
+/* ---- Trophies: unlocks are kept on disk and reported back to the game ----
+ * The count of trophies and their icons (TROP000.PNG, TROP001.PNG...) come from the game's
+ * own sce_sys/trophy/trophy00.trp. The unlocked set is saved in <user dir>/trophies.dat
+ * (user dir: DECEPTION_USER_DIR, or "user"). Names for the unlock notice come from an optional,
+ * hand-made <user dir>/trophy_names.txt.
+ * Without the TRP (some dumps lack it) the count is still the game's 65 (ids 0-64, TROP000-064 in
+ * Deception's trophy00.trp): with a count of 0 every trophy would read as locked. */
+#define TROPHY_MAX 128
+#define TROPHY_GAME_COUNT 65
+#define TROPHY_ALREADY_UNLOCKED ((int32_t)0x8055160C) /* checked by the game's unlock callback */
+static uint32_t trophy_flags[4];
+static uint32_t trophy_total;
+static int trophy_ready;
+
+static const char *trophy_dir(void) {
+    const char *dir=getenv("DECEPTION_USER_DIR");
+    if (dir && dir[0]) return dir;
+    const char *rf=runtime_file_user_dir();
+    if (rf && rf[0]) return rf;
+    return "user";
+}
+static const char *trophy_state_path(void) {
+    static char path[512];
+    snprintf(path,sizeof(path),"%s/trophies.dat",trophy_dir());
+    return path;
+}
+static uint32_t trp_be32(const unsigned char *p) { return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3]; }
+static void trophy_save(void) {
+    FILE *f=fopen(trophy_state_path(),"wb");
+    if (!f) { printf("Runtime: trophies: cannot write %s\n",trophy_state_path()); return; }
+    fwrite(trophy_flags,sizeof(trophy_flags),1,f); fclose(f);
+}
+/* The whole trophy00.trp stays in memory (about 3 MB): trophy_icon() finds the PNG of a trophy. */
+static int trophy_ids[TROPHY_MAX]; /* ids of the icons in the TRP, ascending */
+static uint32_t trophy_id_count;
+static unsigned char *trp_data;
+static uint64_t trp_size;
+static uint32_t trp_files, trp_elem;
+
+static uint64_t trp_be64(const unsigned char *p) { return (uint64_t)trp_be32(p)<<32 | trp_be32(p+4); }
+/* The file `want` (TROP000.PNG, ICON0.PNG, GR001.PNG...) inside the TRP, or 0. */
+static int trp_file(const char *want,const unsigned char **png,uint64_t *size) {
+    for (uint32_t i=0;trp_data && i<trp_files;i++) {
+        uint64_t entry=0x60+(uint64_t)i*trp_elem;
+        if (entry+0x30>trp_size) break;
+        const unsigned char *e=trp_data+entry;
+        if (strncmp((const char *)e,want,32)) continue;
+        uint64_t off=trp_be64(e+0x20), len=trp_be64(e+0x28);
+        if (off>trp_size || len>trp_size-off || !len) return 0;
+        *png=trp_data+off; *size=len;
+        return 1;
+    }
+    return 0;
+}
+/* The PNG of trophy `id` inside the TRP, or 0. */
+static int trophy_icon(int32_t id,const unsigned char **png,uint64_t *size) {
+    char want[16];
+    snprintf(want,sizeof(want),"TROP%03d.PNG",id);
+    return trp_file(want,png,size);
+}
+/* Names: <user dir>/trophy_names.txt, one "ID=Name | Description" per line (the description is
+ * optional), # starts a comment. */
+static char trophy_names[TROPHY_MAX][64];
+static char trophy_details[TROPHY_MAX][160];
+static FILE *trophy_open_text(char *path,size_t size) {
+    snprintf(path,size,"%s/trophy_names.txt",trophy_dir());
+    return fopen(path,"rb");
+}
+static void trophy_load_names(void) {
+    char path[512];
+    FILE *f=trophy_open_text(path,sizeof(path));
+    if (!f) return;
+    char line[512];
+    unsigned loaded=0;
+    while (fgets(line,sizeof(line),f)) {
+        char *p=line;
+        if ((unsigned char)p[0]==0xEF && (unsigned char)p[1]==0xBB && (unsigned char)p[2]==0xBF) p+=3; /* UTF-8 BOM */
+        if (*p=='#') continue;
+        char *eq=strchr(p,'=');
+        if (!eq) continue;
+        char *value=eq+1;
+        size_t n=strlen(value);
+        while (n && (value[n-1]=='\n' || value[n-1]=='\r' || value[n-1]==' ')) value[--n]=0;
+        while (*value==' ') value++;
+        char *end; long id=strtol(p,&end,10);
+        if (end==p || id<0 || id>=TROPHY_MAX) continue;
+        char *detail="";
+        char *bar=strchr(value,'|');
+        if (bar) {
+            *bar=0; detail=bar+1;
+            while (*detail==' ') detail++;
+            size_t d=strlen(detail);
+            while (d && detail[d-1]==' ') detail[--d]=0;
+            size_t m=strlen(value);
+            while (m && value[m-1]==' ') value[--m]=0;
+        }
+        if (!*value) continue;
+        snprintf(trophy_names[id],sizeof(trophy_names[id]),"%s",value);
+        snprintf(trophy_details[id],sizeof(trophy_details[id]),"%s",detail);
+        loaded++;
+    }
+    fclose(f);
+    printf("Runtime: trophies: %u texts read from %s\n",loaded,path);
+}
+static void trophy_load_once(void) {
+    if (trophy_ready) return;
+    trophy_ready=1;
+    FILE *f=fopen(trophy_state_path(),"rb");
+    if (f) { if (fread(trophy_flags,sizeof(trophy_flags),1,f)!=1) memset(trophy_flags,0,sizeof(trophy_flags)); fclose(f); }
+    trophy_load_names();
+    for (int i=0;i<TROPHY_GAME_COUNT;i++) trophy_ids[i]=i; /* kept when the TRP is missing or unreadable */
+    trophy_total=trophy_id_count=TROPHY_GAME_COUNT;
+    int fd=(int)runtime_file_open("/app0/sce_sys/trophy/trophy00.trp",0,0);
+    if (fd<0) fd=(int)runtime_file_open("/app0/sce_sys/trophy00.trp",0,0);
+    if (fd<0) { note("trophies: trophy00.trp not found; 65 trophies assumed, no trophy icons"); return; }
+    const uint64_t limit=32u<<20;
+    uint64_t cap=4u<<20, got=0;
+    unsigned char *buf=malloc(cap);
+    while (buf) {
+        if (got==cap) {
+            if (cap>=limit) break;
+            unsigned char *bigger=realloc(buf,cap*2);
+            if (!bigger) break;
+            buf=bigger; cap*=2;
+        }
+        int64_t n=(int64_t)runtime_file_read(fd,buf+got,cap-got);
+        if (n<=0) break;
+        got+=(uint64_t)n;
+    }
+    runtime_file_close(fd);
+    /* TRP header (big endian): magic DC A2 4D 00, files_count at 0x10, element_size at 0x14;
+     * the entries start at 0x60 and each is a 32-byte file name, offset (u64), size (u64). */
+    if (!buf || got<0x60 || buf[0]!=0xDC || buf[1]!=0xA2 || buf[2]!=0x4D || buf[3]!=0x00) { note("trophies: unexpected trophy00.trp header"); free(buf); return; }
+    uint32_t files=trp_be32(buf+0x10), elem=trp_be32(buf+0x14);
+    if (elem<0x30 || elem>0x100) { note("trophies: unexpected trophy00.trp entry size"); free(buf); return; }
+    trp_data=buf; trp_size=got; trp_files=files; trp_elem=elem;
+    uint32_t total=0;
+    for (uint32_t i=0;i<files;i++) {
+        uint64_t off=0x60+(uint64_t)i*elem;
+        if (off+32>got) break;
+        const char *name=(const char *)buf+off;
+        if (!strncmp(name,"TROP",4) && name[4]>='0' && name[4]<='9' && name[5]>='0' && name[5]<='9' && name[6]>='0' && name[6]<='9' && !strncmp(name+7,".PNG",5)) {
+            int id=(name[4]-'0')*100+(name[5]-'0')*10+(name[6]-'0');
+            if (id<TROPHY_MAX && total<TROPHY_MAX) trophy_ids[total++]=id;
+        }
+    }
+    if (total) trophy_total=trophy_id_count=total;
+    printf("Runtime: trophies: %u in trophy00.trp, %u already unlocked\n",total,
+        (unsigned)(__builtin_popcount(trophy_flags[0])+__builtin_popcount(trophy_flags[1])+__builtin_popcount(trophy_flags[2])+__builtin_popcount(trophy_flags[3])));
+}
+static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
+    (void)user; (void)label; (void)options;
+    if (!ctx) return TROPHY_INVALID;
+    *ctx=new_id(); return 0;
+}
+static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_INVALID; *handle=new_id(); return 0; }
+static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) {
+    (void)ctx; (void)handle; (void)options;
+    pthread_mutex_lock(&lock); trophy_load_once(); pthread_mutex_unlock(&lock);
+    return 0;
+}
+/* The notice of an unlocked trophy: its name, description and icon (lock not held). */
+static void trophy_notify(int32_t id) {
+    char notice[64], detail[sizeof(trophy_details[0])];
+    const unsigned char *png=0; uint64_t png_size=0;
+    pthread_mutex_lock(&lock);
+    if (trophy_names[id][0]) snprintf(notice,sizeof(notice),"%s",trophy_names[id]);
+    else snprintf(notice,sizeof(notice),"Trophy ID %d",id);
+    snprintf(detail,sizeof(detail),"%s",trophy_details[id]);
+    int has_icon=trophy_icon(id,&png,&png_size);
+    pthread_mutex_unlock(&lock);
+    deception_gpu_toast_trophy(id,notice,detail,has_icon ? png : 0,has_icon ? png_size : 0);
+}
+/* On a PlayStation the system grants the platinum (id 0) with the last trophy: 1 when every other
+ * trophy of the package is unlocked and this call just unlocked the platinum. Lock held. */
+static int trophy_grant_platinum(void) {
+    int has_platinum=0;
+    if (trophy_flags[0]&1u) return 0;
+    for (uint32_t i=0;i<trophy_id_count;i++) {
+        int t=trophy_ids[i];
+        if (t==0) { has_platinum=1; continue; }
+        if (!(trophy_flags[t/32]>>(t%32)&1u)) return 0;
+    }
+    if (!has_platinum) return 0;
+    trophy_flags[0]|=1u;
+    trophy_save();
+    return 1;
+}
+static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
+    (void)ctx; (void)handle;
+    if (platinum) *platinum=-1;
+    if (id<0 || id>=TROPHY_MAX) return TROPHY_INVALID;
+    pthread_mutex_lock(&lock);
+    trophy_load_once();
+    uint32_t bit=1u<<(id%32);
+    int already=(trophy_flags[id/32]&bit)!=0;
+    int platinum_now=0;
+    if (!already) {
+        trophy_flags[id/32]|=bit;
+        trophy_save();
+        platinum_now=id!=0 && trophy_grant_platinum();
+    }
+    pthread_mutex_unlock(&lock);
+    if (already) { printf("Runtime: trophy %d already unlocked\n",id); return TROPHY_ALREADY_UNLOCKED; }
+    printf("Runtime: trophy %d unlocked\n",id);
+    trophy_notify(id);
+    if (platinum_now) {
+        if (platinum) *platinum=0;
+        printf("Runtime: trophy 0 (platinum) unlocked\n");
+        trophy_notify(0);
+    }
+    return 0;
+}
+static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) {
+    if (!flags || !count) return TROPHY_INVALID;
+    if (ctx<=0 || handle<=0) return TROPHY_INVALID;
+    pthread_mutex_lock(&lock);
+    trophy_load_once();
+    memcpy(flags,trophy_flags,16); *count=trophy_total;
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
+static ABI int32_t trophy_release(int32_t id) { return id>0 ? 0 : TROPHY_INVALID; }
+/* sceNpTrophyGetGameIcon(ctx, handle, buffer, size) / GetGroupIcon(ctx, handle, group, ...) /
+ * GetTrophyIcon(ctx, handle, trophy, ...): the PNG from trophy00.trp (ICON0.PNG, GR%03d.PNG,
+ * TROP%03d.PNG). With no buffer *size gets the icon's size; a smaller buffer is
+ * INSUFFICIENT_BUFFER. */
+#define TROPHY_INSUFFICIENT_BUFFER ((int32_t)0x80551605)
+#define TROPHY_INVALID_HANDLE ((int32_t)0x80551608)
+#define TROPHY_INVALID_CONTEXT ((int32_t)0x80551609)
+#define TROPHY_ICON_NOT_FOUND ((int32_t)0x80551614)
+
+/* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
+#define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
+static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
+    (void)path; (void)offset; (void)size; (void)result; return DISC_MAP_NO_BITMAP;
+}
+
+static const RuntimeExport exports[]={
+    {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",user_terminate},
+    {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
+    {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
+    {"sceUserServiceGetUserColor",user_color},
+    {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceGetStatus",system_status},
+    {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
+
+    {"sceSystemServiceGetDisplaySafeAreaInfo",safe_area}, {"sceSystemServiceDisableMusicPlayer",disable_music_player},
+    {"sceSystemServiceReenableMusicPlayer",system_setting},
+
+    {"sceNetErrnoLoc",net_errno_loc},
+    {"sceNetPoolCreate",net_pool_create}, {"sceNetPoolDestroy",net_pool_destroy},
+    {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",net_epoll_destroy},
+    {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",net_resolver_destroy},
+    {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
+    {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
+    {"sceNetSocket",net_unreachable}, {"sceNetConnect",net_unreachable}, {"sceNetBind",net_unreachable},
+    {"sceNetListen",net_unreachable}, {"sceNetAccept",net_unreachable}, {"sceNetSend",net_unreachable},
+    {"sceNetSendto",net_unreachable}, {"sceNetRecv",net_unreachable}, {"sceNetRecvfrom",net_unreachable},
+    {"sceNetSetsockopt",net_unreachable}, {"sceNetGetsockopt",net_unreachable},
+    {"sceNetGetsockname",net_unreachable},
+    {"sceNetShutdown",net_unreachable},
+    {"sceNetSocketClose",net_unreachable}, {"sceNetSocketAbort",net_unreachable},
+    {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable},
+
+    {"sceNetCtlGetResult",netctl_result}, {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
+    {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",netctl_check},
+    {"sceNetCtlUnregisterCallback",netctl_unregister}, {"sceNetCtlGetNatInfo",netctl_nat},
+
+    /* ShareUtility (the share menu's upload data; no PS button share menu here): accepted, unused. */
+
+    {"sceSslInit",lib_init_id}, {"sceSslTerm",ok_void},
+    {"sceHttpInit",lib_init_id}, {"sceHttpTerm",ok_void},
+    {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",ok_void},
+
+    {"sceHttpSendRequest",http_fail},
+    {"sceHttpSetConnectTimeOut",ok_void},
+
+    {"sceHttpAddRequestHeader",ok_void},
+    {"sceHttpDeleteConnection",ok_void}, {"sceHttpDeleteRequest",ok_void},
+
+    {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
+    {"sceHttpReadData",http_fail},
+    {"sceNpGetState",np_state}, {"sceNpGetNpId",np_signed_out},
+
+    {"sceNpRegisterStateCallbackA",np_register}, {"sceNpRegisterStateCallback",np_register},
+    {"sceNpUnregisterStateCallback",ok_void}, {"sceNpGetOnlineId",np_signed_out},
+    {"sceNpGetAccountCountry",np_signed_out}, {"sceNpGetParentalControlInfo",np_signed_out}, {"sceNpUnregisterStateCallbackA",ok_void},
+    {"sceNpRegisterPlusEventCallback",np_register},
+    {"sceNpUnregisterPlusEventCallback",ok_void}, {"sceNpCheckCallback",ok_void},
+    {"sceNpSetNpTitleId",ok_void}, {"sceNpNotifyPlusFeature",ok_void}, {"sceNpSetContentRestriction",ok_void},
+    {"sceNpCreateAsyncRequest",np_create_async}, {"sceNpDeleteRequest",np_delete_request}, {"sceNpAbortRequest",np_abort_request},
+    {"sceNpPollAsync",np_poll_request},
+    {"sceNpCheckNpAvailabilityA",np_availability},
+    {"sceNpGetParentalControlInfoA",np_parental}, {"sceNpGetAccountIdA",np_account_id},
+
+    {"sceNpCheckPlus",np_signed_out},
+
+    {"sceNpAuthDeleteRequest",ok_void},
+
+    {"sceNpScoreDeleteNpTitleCtx",ok_void},
+    {"sceNpScoreCreateRequest",np_request}, {"sceNpScoreDeleteRequest",ok_void}, {"sceNpScoreAbortRequest",ok_void},
+    {"sceNpWebApiInitialize",lib_init_id}, {"sceNpWebApiTerminate",ok_void},
+
+    {"sceNpWebApiCreateRequest",np_signed_out},
+    {"sceNpWebApiDeleteRequest",ok_void}, {"sceNpWebApiAbortRequest",ok_void},
+    {"sceNpWebApiDeleteContext",ok_void}, {"sceNpWebApiReadData",np_signed_out},
+
+    {"sceNpWebApiUtilityParseNpId",np_signed_out},
+    {"sceNpMatching2ContextStart",np_signed_out}, {"sceNpMatching2ContextStop",ok_void},
+    {"sceNpMatching2DestroyContext",ok_void},
+    {"sceNpMatching2RegisterContextCallback",ok_void},
+    {"sceNpMatching2RegisterRoomEventCallback",ok_void}, {"sceNpMatching2RegisterSignalingCallback",ok_void},
+    {"sceNpMatching2SetDefaultRequestOptParam",ok_void},
+
+    {"sceNpMatching2LeaveRoom",np_signed_out}, {"sceNpMatching2SearchRoom",np_signed_out},
+    {"sceNpMatching2GetServerId",np_signed_out}, {"sceNpMatching2GetWorldInfoList",np_signed_out},
+
+    {"sceNpMatching2SetRoomDataExternal",np_signed_out},
+    {"sceNpMatching2SetRoomDataInternal",np_signed_out},
+    {"sceNpMatching2SignalingGetConnectionStatus",np_signed_out}, {"sceNpMatching2SignalingGetPingInfo",np_signed_out},
+
+    {"sceNpMatching2Initialize",ok_void}, {"sceNpMatching2Terminate",ok_void},
+
+    {"sceCommonDialogInitialize",common_init},
+    {"sceMsgDialogInitialize",msg_init}, {"sceMsgDialogOpen",msg_open},
+    {"sceMsgDialogUpdateStatus",msg_status}, {"sceMsgDialogTerminate",msg_term},
+    {"sceMsgDialogClose",msg_close},
+    {"sceMsgDialogGetResult",msg_result},
+    {"sceSaveDataDialogInitialize",save_init}, {"sceSaveDataDialogOpen",save_open},
+    {"sceSaveDataDialogUpdateStatus",save_status}, {"sceSaveDataDialogTerminate",save_term},
+    {"sceSaveDataDialogClose",save_close},
+    {"sceSaveDataDialogGetResult",save_result},
+
+    {"sceNpCommerceDialogGetResult",commerce_result},
+
+    {"sceNetGetSockInfo",net_sock_info},
+    {"sceNpCommerceDialogInitialize",commerce_init}, {"sceNpCommerceDialogOpen",commerce_open},
+    {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
+    {"sceNpCommerceDialogClose",commerce_close}, {"sceImeDialogGetPanelSize",ime_panel_size},
+    {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
+    {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_abort},
+    {"sceSaveDataDialogIsReadyToDisplay",save_ready}, {"sceSaveDataDialogProgressBarSetValue",save_progress},
+    {"sceImeKeyboardOpen",keyboard_open_call}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
+
+    {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
+    {"sceNpTrophyRegisterContext",trophy_register}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
+
+    {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
+    {"sceNpTrophyDestroyHandle",trophy_release}, {"sceNpTrophyDestroyContext",trophy_release},
+
+    {"sceDiscMapIsRequestOnHDD",discmap_on_hdd},
+};
+uintptr_t runtime_services_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }

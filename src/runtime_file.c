@@ -1,0 +1,701 @@
+/* Guest file system: PS4 mount points mapped onto host directories.
+ *   /app0, /hostapp  -> game package root (read-only by convention); a file the update (patch)
+ *                       package also holds is served from there, as the PS4 overlays a patch
+ *   /temp0 (sceAppContentTemporaryDataMount2) and SaveData mounts -> user directory
+ * Guest descriptors are small integers in our own table; stdio 0-2 pass through.
+ * Paths containing ".." components are rejected rather than normalized. */
+#define _GNU_SOURCE
+#include "runtime.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#ifdef _WIN32
+#include <sys/utime.h>
+#endif
+#ifdef _WIN32
+#include <windows.h>
+#include <bcrypt.h>
+/* 64-bit sizes and times; directories are never opened as CRT descriptors. */
+typedef struct _stat64 HostStat;
+#define host_stat(path,s) _stat64(path,s)
+#define host_fstat(fd,s) _fstat64(fd,s)
+#define host_lseek _lseeki64
+#define O_DIRECTORY 0x40000000 /* deception marker, removed before _open */
+#else
+typedef struct stat HostStat;
+#define host_stat(path,s) stat(path,s)
+#define host_fstat(fd,s) fstat(fd,s)
+#define host_lseek lseek
+#endif
+#define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
+#define MAX_FILES 1024
+#define MAX_MOUNTS 64 /* game, user, SaveData mounts, --mount, add-ons */
+
+typedef struct { int64_t sec, nsec; } GuestTimespec;
+typedef struct {
+    uint32_t dev, ino;
+    uint16_t mode, nlink;
+    uint32_t uid, gid, rdev;
+    GuestTimespec atime, mtime, ctime;
+    int64_t size, blocks;
+    uint32_t blksize, flags, gen;
+    int32_t lspare;
+    GuestTimespec birthtime;
+} GuestStat;
+_Static_assert(sizeof(GuestStat)==120,"FreeBSD stat layout");
+
+typedef struct { char *names; size_t count, *offsets; unsigned char *types; } Listing;
+/* Character devices served without a host file (shadPS4 file_system.cpp device table). */
+enum { DEV_NONE, DEV_RANDOM, DEV_ZERO, DEV_NULL };
+typedef struct { int used, host, device; Listing *dir; size_t position; char path[512]; } File;
+#define MOUNT_GUEST 128 /* guest mount points, or whole file paths for --mount */
+typedef struct { char guest[MOUNT_GUEST]; char host[512]; } Mount;
+static File files[MAX_FILES];
+static Mount mounts[MAX_MOUNTS];
+static size_t mount_count, opens, reads, writes, missing;
+static uint64_t bytes_read;
+static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+
+int runtime_file_mount(const char *guest,const char *host) {
+    pthread_mutex_lock(&lock);
+    for (size_t i=0;i<mount_count;++i) if (!strcmp(mounts[i].guest,guest)) {
+        snprintf(mounts[i].host,sizeof(mounts[i].host),"%s",host);
+        pthread_mutex_unlock(&lock); return 0;
+    }
+    if (mount_count==MAX_MOUNTS || strlen(guest)>=MOUNT_GUEST || strlen(host)>=512) { pthread_mutex_unlock(&lock); return -1; }
+    snprintf(mounts[mount_count].guest,MOUNT_GUEST,"%s",guest);
+    snprintf(mounts[mount_count].host,512,"%s",host);
+    ++mount_count;
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
+void runtime_file_unmount(const char *guest) {
+    pthread_mutex_lock(&lock);
+    for (size_t i=0;i<mount_count;++i) if (!strcmp(mounts[i].guest,guest)) {
+        mounts[i]=mounts[--mount_count]; break;
+    }
+    pthread_mutex_unlock(&lock);
+}
+static char user_root[512]="user";
+const char *runtime_file_user_dir(void) { return user_root; }
+/* The update package's root (--update), or "" without one. */
+static char update_root[512];
+void runtime_file_set_update(const char *update) { snprintf(update_root,sizeof(update_root),"%s",update ? update : ""); }
+void runtime_file_configure(const char *app0,const char *user) {
+    snprintf(user_root,sizeof(user_root),"%s",user);
+    runtime_file_mount("/app0",app0);
+    runtime_file_mount("/hostapp",app0);
+    mkdir(user,0755);
+}
+/* Set while resolving a package path to the game's own copy (merged listings). */
+static _Thread_local int skip_update;
+/* Resolve a guest path to a host path; returns 0 or a host errno. */
+static int translate(const char *guest,char *out,size_t size) {
+    if (!guest || !*guest) return ENOENT;
+    char buffer[1024];
+    if (guest[0]!='/') snprintf(buffer,sizeof(buffer),"/app0/%s",guest);
+    else snprintf(buffer,sizeof(buffer),"%s",guest);
+    for (const char *p=buffer;(p=strstr(p,".."));p+=2)
+        if ((p==buffer || p[-1]=='/') && (p[2]==0 || p[2]=='/')) return EACCES;
+    pthread_mutex_lock(&lock);
+    size_t best=0; const Mount *m=NULL;
+    for (size_t i=0;i<mount_count;++i) {
+        size_t n=strlen(mounts[i].guest);
+        if (!strncmp(buffer,mounts[i].guest,n) && (buffer[n]=='/' || !buffer[n]) && n>best) { best=n; m=&mounts[i]; }
+    }
+    int result=0;
+    if (!m) result=ENOENT;
+    else if ((size_t)snprintf(out,size,"%s%s",m->host,buffer+best)>=size) result=ENAMETOOLONG;
+    /* The update overlays the package: its copy of a file or folder wins. */
+    const int package=m && (!strcmp(m->guest,"/app0") || !strcmp(m->guest,"/hostapp"));
+    char patched[1100];
+    pthread_mutex_unlock(&lock);
+    if (!result && package && update_root[0] && buffer[best] && !skip_update) {
+        HostStat s;
+        if ((size_t)snprintf(patched,sizeof(patched),"%s%s",update_root,buffer+best)<size && !host_stat(patched,&s))
+            snprintf(out,size,"%s",patched);
+    }
+    if (result==ENOENT) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
+    return result;
+}
+static int host_flags(int flags) {
+    int r;
+    switch (flags&3) { case 0: r=O_RDONLY; break; case 1: r=O_WRONLY; break; default: r=O_RDWR; }
+    if (flags&0x4) r|=O_NONBLOCK;
+    if (flags&0x8) r|=O_APPEND;
+    if (flags&0x80) r|=O_SYNC;
+    if (flags&0x200) r|=O_CREAT;
+    if (flags&0x400) r|=O_TRUNC;
+    if (flags&0x800) r|=O_EXCL;
+    if (flags&0x20000) r|=O_DIRECTORY;
+#ifdef _WIN32
+    r|=O_BINARY;
+#endif
+    return r|O_CLOEXEC;
+}
+static void free_listing(Listing *l) { if (l) { free(l->names); free(l->offsets); free(l->types); free(l); } }
+static Listing *list_directory(const char *path) {
+    DIR *d=opendir(path);
+    if (!d) return NULL;
+    Listing *l=calloc(1,sizeof(*l));
+    size_t capacity=0,bytes=0,cap_names=0;
+    struct dirent *e;
+    while (l && (e=readdir(d))) {
+        size_t n=strlen(e->d_name)+1;
+        if (l->count==capacity) {
+            capacity=capacity ? capacity*2 : 64;
+            l->offsets=realloc(l->offsets,capacity*sizeof(size_t));
+            l->types=realloc(l->types,capacity);
+        }
+        if (bytes+n>cap_names) { cap_names=(bytes+n)*2; l->names=realloc(l->names,cap_names); }
+        if (!l->offsets || !l->types || !l->names) { fputs("Out of memory listing directory\n",stderr); exit(1); }
+        memcpy(l->names+bytes,e->d_name,n);
+        l->offsets[l->count]=bytes;
+#ifdef _WIN32
+        /* MinGW's dirent has no d_type. */
+        char child[1100]; HostStat entry;
+        snprintf(child,sizeof(child),"%s/%s",path,e->d_name);
+        l->types[l->count]=host_stat(child,&entry) ? 0 : S_ISDIR(entry.st_mode) ? 4 : S_ISREG(entry.st_mode) ? 8 : 0;
+#else
+        unsigned char type=e->d_type;
+        if (type==DT_LNK || type==DT_UNKNOWN) {
+            struct stat entry;
+            if (!fstatat(dirfd(d),e->d_name,&entry,0))
+                type=S_ISDIR(entry.st_mode) ? DT_DIR : S_ISREG(entry.st_mode) ? DT_REG : type;
+        }
+        l->types[l->count]=type==DT_DIR ? 4 : type==DT_REG ? 8 : type==DT_LNK ? 10 : 0;
+#endif
+        ++l->count; bytes+=n;
+    }
+    closedir(d);
+    return l;
+}
+/* A package folder the update also has lists the names of both, as the PS4 overlays a patch
+ * (Deception finds its archives by listing FILE_PS4 and FILE_PS4/ARCHIVE). */
+static Listing *package_listing(const char *guest,const char *path) {
+    Listing *l=list_directory(path);
+    if (!l || !update_root[0] || strncmp(path,update_root,strlen(update_root))) return l;
+    char base[1024]; HostStat s;
+    skip_update=1;
+    const int e=translate(guest,base,sizeof(base));
+    skip_update=0;
+    if (e || !strcmp(base,path) || host_stat(base,&s) || !S_ISDIR(s.st_mode)) return l;
+    Listing *b=list_directory(base);
+    if (!b) return l;
+    for (size_t i=0;i<b->count;++i) {
+        const char *name=b->names+b->offsets[i];
+        int seen=0;
+        for (size_t j=0;j<l->count && !seen;++j) seen=!strcmp(name,l->names+l->offsets[j]);
+        if (seen) continue;
+        size_t bytes=l->count ? l->offsets[l->count-1]+strlen(l->names+l->offsets[l->count-1])+1 : 0, n=strlen(name)+1;
+        char *names=realloc(l->names,bytes+n);
+        size_t *offsets=realloc(l->offsets,(l->count+1)*sizeof(size_t));
+        unsigned char *types=realloc(l->types,l->count+1);
+        if (names) l->names=names;
+        if (offsets) l->offsets=offsets;
+        if (types) l->types=types;
+        if (!names || !offsets || !types) break;
+        memcpy(l->names+bytes,name,n);
+        l->offsets[l->count]=bytes; l->types[l->count]=b->types[i]; ++l->count;
+    }
+    free_listing(b);
+    return l;
+}
+static void convert_stat(const HostStat *s,GuestStat *g) {
+    memset(g,0,sizeof(*g));
+    g->dev=(uint32_t)s->st_dev; g->ino=(uint32_t)s->st_ino;
+    g->nlink=(uint16_t)s->st_nlink;
+    g->size=s->st_size;
+#ifdef _WIN32
+    /* FreeBSD mode bits: directories rwxr-xr-x, files rw-r--r--. */
+    g->mode=(uint16_t)(S_ISDIR(s->st_mode) ? 0040755 : 0100644);
+    g->blocks=(s->st_size+511)/512; g->blksize=4096;
+    g->atime=(GuestTimespec){s->st_atime,0};
+    g->mtime=(GuestTimespec){s->st_mtime,0};
+    g->ctime=(GuestTimespec){s->st_ctime,0};
+#else
+    g->mode=(uint16_t)s->st_mode;
+    g->blocks=s->st_blocks; g->blksize=(uint32_t)s->st_blksize;
+    g->atime=(GuestTimespec){s->st_atim.tv_sec,s->st_atim.tv_nsec};
+    g->mtime=(GuestTimespec){s->st_mtim.tv_sec,s->st_mtim.tv_nsec};
+    g->ctime=(GuestTimespec){s->st_ctim.tv_sec,s->st_ctim.tv_nsec};
+#endif
+    g->birthtime=g->ctime;
+}
+#ifdef _WIN32
+/* The CRT reports st_ino 0 for every file. Mono's FileStream takes files with the same device and
+ * inode for one file, so with a save file open for writing its share check refused the next one
+ * ("Sharing violation") and the save never finished. The volume serial and the 64-bit file index
+ * identify a file; ino folds the index into 32 bits. */
+static void file_identity(HANDLE h,GuestStat *g) {
+    BY_HANDLE_FILE_INFORMATION i;
+    if (h==INVALID_HANDLE_VALUE || !GetFileInformationByHandle(h,&i)) return;
+    g->dev=(uint32_t)i.dwVolumeSerialNumber;
+    g->ino=(uint32_t)(i.nFileIndexLow^i.nFileIndexHigh*UINT32_C(0x9e3779b1));
+}
+static void path_identity(const char *path,GuestStat *g) {
+    HANDLE h=CreateFileA(path,0,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,NULL);
+    if (h==INVALID_HANDLE_VALUE) return;
+    file_identity(h,g);
+    CloseHandle(h);
+}
+#endif
+static File *get(int fd) {
+    if (fd<3 || fd>=MAX_FILES || !files[fd].used) return NULL;
+    return &files[fd];
+}
+/* DECEPTION_FILE_TRACE=1: opens, writes, renames and removals outside the game package (/app0,
+ * /hostapp) and failed reads anywhere. */
+/* DECEPTION_FILE_TRACE=1: the save and user files the game touches; 2 also the game package's
+ * opens and reads (host path, offset, size). */
+static int file_trace_level(void) { static int v=-1; if (v<0) { const char *e=getenv("DECEPTION_FILE_TRACE"); v=e && (e[0]=='1' || e[0]=='2') ? e[0]-'0' : 0; } return v; }
+static int file_trace(void) { return file_trace_level()>0; }
+static const char *traced_path(int fd) {
+    static const char none[]="?";
+    return fd>=3 && fd<MAX_FILES && files[fd].used ? files[fd].path : none;
+}
+/* Game mounts (including linked mod overlays) are read-only. Saves use other mounts. */
+static int game_path(const char *p) {
+    if (!p || !*p) return 0;
+    if (*p!='/') return 1;
+    return (!strncmp(p,"/app0",5) && (!p[5] || p[5]=='/')) ||
+           (!strncmp(p,"/hostapp",8) && (!p[8] || p[8]=='/'));
+}
+static int device_kind(const char *p) {
+    static const struct { const char *path; int kind; } devices[]={
+        {"/dev/urandom",DEV_RANDOM}, {"/dev/random",DEV_RANDOM}, {"/dev/srandom",DEV_RANDOM},
+        {"/dev/rng",DEV_RANDOM}, {"/dev/zero",DEV_ZERO}, {"/dev/null",DEV_NULL},
+    };
+    if (!p) return DEV_NONE;
+    for (size_t i=0;i<sizeof(devices)/sizeof(*devices);++i) if (!strcmp(p,devices[i].path)) return devices[i].kind;
+    return DEV_NONE;
+}
+/* Reads of a random device return that many bytes from the host CSPRNG. */
+static int64_t device_read(int kind,void *buffer,uint64_t size) {
+    if (kind==DEV_NULL) return 0;
+    if (kind==DEV_ZERO) { memset(buffer,0,size); return (int64_t)size; }
+#ifdef _WIN32
+    for (uint64_t done=0; done<size;) {
+        ULONG n=(ULONG)(size-done>0x10000000 ? 0x10000000 : size-done);
+        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL,(unsigned char *)buffer+done,n,BCRYPT_USE_SYSTEM_PREFERRED_RNG))) return -EIO;
+        done+=n;
+    }
+    return (int64_t)size;
+#else
+    int h=open("/dev/urandom",O_RDONLY|O_CLOEXEC);
+    if (h<0) return -errno;
+    uint64_t done=0;
+    while (done<size) { ssize_t n=read(h,(char *)buffer+done,size-done); if (n<=0) break; done+=(uint64_t)n; }
+    close(h);
+    return done==size ? (int64_t)size : -EIO;
+#endif
+}
+/* All operations return >=0 or -(host errno); wrappers adapt the convention. */
+static int64_t do_open(const char *guest,int flags,int mode) {
+    int device=device_kind(guest);
+    if (device) {
+        pthread_mutex_lock(&lock);
+        int fd=-1;
+        for (int i=3;i<MAX_FILES;++i) if (!files[i].used) { fd=i; break; }
+        if (fd>=0) {
+            files[fd]=(File){.used=1,.host=-1,.device=device};
+            snprintf(files[fd].path,sizeof(files[fd].path),"%s",guest);
+            ++opens;
+        }
+        pthread_mutex_unlock(&lock);
+        return fd<0 ? -EMFILE : fd;
+    }
+    if (game_path(guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
+    char path[1024];
+    int e=translate(guest,path,sizeof(path));
+    if (e) return -e;
+#ifdef _WIN32
+    /* Windows cannot open a directory as a CRT descriptor: directories are listings only. */
+    (void)mode;
+    HostStat s;
+    Listing *dir=NULL;
+    int host=-1;
+    if (!host_stat(path,&s) && S_ISDIR(s.st_mode)) {
+        if (flags&3) return -EISDIR;
+        if (!(dir=package_listing(guest,path))) return -EACCES;
+    } else if (flags&0x20000) {
+        e=errno==ENOENT ? ENOENT : ENOTDIR;
+        if (e==ENOENT) { ++missing; printf("Runtime: open(%s) -> not found\n",guest); }
+        return -e;
+    } else {
+        host=open(path,host_flags(flags)&~O_DIRECTORY,_S_IREAD|_S_IWRITE);
+        if (host<0) {
+            e=errno;
+            if (e==ENOENT) { ++missing; printf("Runtime: open(%s) -> not found\n",guest); }
+            return -e;
+        }
+        if (host_fstat(host,&s)) memset(&s,0,sizeof(s));
+    }
+#else
+    int host=open(path,host_flags(flags),mode ? mode : 0644);
+    if (host<0) {
+        e=errno;
+        if (e==ENOENT) { ++missing; printf("Runtime: open(%s) -> not found\n",guest); }
+        return -e;
+    }
+    struct stat s;
+    Listing *dir=NULL;
+    if (!fstat(host,&s) && S_ISDIR(s.st_mode)) dir=package_listing(guest,path);
+#endif
+    pthread_mutex_lock(&lock);
+    int fd=-1;
+    for (int i=3;i<MAX_FILES;++i) if (!files[i].used) { fd=i; break; }
+    if (fd<0) { pthread_mutex_unlock(&lock); if (host>=0) close(host); free_listing(dir); return -EMFILE; }
+    files[fd]=(File){.used=1,.host=host,.dir=dir};
+    snprintf(files[fd].path,sizeof(files[fd].path),"%s",guest);
+    ++opens;
+    pthread_mutex_unlock(&lock);
+    if (file_trace_level()==2 && game_path(guest)) printf("File trace: open(%s) -> fd %d (%s), %lld bytes\n",guest,fd,path,(long long)s.st_size);
+    if (file_trace() && !game_path(guest)) {
+        char frames[2048];
+        runtime_guest_backtrace(frames,sizeof(frames),32);
+        printf("File trace: open(%s, 0x%x) -> fd %d, %lld bytes\n    from %s\n",guest,flags,fd,(long long)s.st_size,frames);
+    }
+    return fd;
+}
+static int64_t do_close(int fd) {
+    if (fd>=0 && fd<3) return 0;
+    pthread_mutex_lock(&lock);
+    File *f=get(fd);
+    if (!f) { pthread_mutex_unlock(&lock); return -EBADF; }
+    if (file_trace() && !game_path(f->path) && !f->device) printf("File trace: close(fd %d %s)\n",fd,f->path);
+    if (f->host>=0) close(f->host);
+    free_listing(f->dir);
+    *f=(File){0};
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
+static int host_fd(int fd) {
+    if (fd>=0 && fd<3) return fd;
+    File *f=get(fd);
+    return f ? f->host : -1;
+}
+#ifdef _WIN32
+/* The CRT reads and writes at most INT_MAX bytes per call. */
+static ssize_t host_read(int h,void *buffer,uint64_t size) { return read(h,buffer,(unsigned)(size>0x7ffff000 ? 0x7ffff000 : size)); }
+static ssize_t host_write(int h,const void *buffer,uint64_t size) { return write(h,buffer,(unsigned)(size>0x7ffff000 ? 0x7ffff000 : size)); }
+#else
+#define host_read read
+#define host_write write
+#endif
+/* Pages of the destination may be write-protected for GPU tracking: the kernel's copy then
+ * fails with EFAULT instead of faulting to our handler. A user-mode write to each page first
+ * goes through the handler, which unprotects it (and records the upcoming write). */
+static void touch_for_write(void *buffer,uint64_t size) {
+    if (!size) return;
+    uintptr_t p=(uintptr_t)buffer & ~(uintptr_t)4095, end=(uintptr_t)buffer+size;
+    for (; p<end; p+=4096) {
+        volatile unsigned char *b=(volatile unsigned char *)(p<(uintptr_t)buffer ? (uintptr_t)buffer : p);
+        *b=*b;
+    }
+}
+static int device_of(int fd) { File *f=get(fd); return f ? f->device : DEV_NONE; }
+/* The GPU tracker can protect a page again between touch_for_write and the kernel's copy (a page
+ * shared with a buffer the GPU thread uploads meanwhile): the copy then fails or stops short, and
+ * the game drops the asset for the session. A read that ends before the end of the file is
+ * finished through a host buffer, copied in user mode, where such a write faults to our handler. */
+static ssize_t finish_short_read(int fd,int h,unsigned char *buffer,uint64_t size,int64_t offset,ssize_t n) {
+    const int error=n<0 ? errno : 0;
+    HostStat st;
+    if ((uint64_t)(n<0 ? 0 : n)>=size || host_fstat(h,&st) || offset+(n<0 ? 0 : n)>=(int64_t)st.st_size) return n;
+    const uint64_t want=size<(uint64_t)(st.st_size-offset) ? size : (uint64_t)(st.st_size-offset);
+    uint64_t done=n<0 ? 0 : (uint64_t)n;
+    unsigned char *bounce=malloc(1<<20);
+    if (!bounce) return n;
+    while (done<want) {
+        const uint64_t chunk=want-done<(1u<<20) ? want-done : (1u<<20);
+        ssize_t got=pread(h,bounce,chunk,offset+(int64_t)done);
+        if (got<=0) break;
+        memcpy(buffer+done,bounce,(size_t)got);
+        done+=(uint64_t)got;
+    }
+    free(bounce);
+    printf("Runtime: file read into guest memory came back short (%lld of %llu bytes, errno %d, fd %d %s); "
+           "finished through a host buffer: %llu bytes\n",(long long)n,(unsigned long long)size,error,fd,
+           traced_path(fd),(unsigned long long)done);
+    if (!done) errno=error;
+    return done ? (ssize_t)done : n;
+}
+static int64_t do_read(int fd,void *buffer,uint64_t size) {
+    int device=device_of(fd);
+    if (device) { touch_for_write(buffer,size); return device_read(device,buffer,size); }
+    int h=host_fd(fd);
+    if (h<0) return -EBADF;
+    touch_for_write(buffer,size);
+    const int64_t start=host_lseek(h,0,SEEK_CUR);
+    const uint64_t wait_start=runtime_wait_begin();
+    ssize_t n=host_read(h,buffer,size);
+    if (start>=0 && n<(ssize_t)size) {
+        n=finish_short_read(fd,h,buffer,size,start,n);
+        if (n>0) host_lseek(h,start+n,SEEK_SET);
+    }
+    runtime_wait_end("file read",wait_start,"bytes",(long long)size);
+    if (file_trace_level()==2) printf("File trace: read(fd %d %s, %llu @%lld) -> %lld\n",fd,traced_path(fd),(unsigned long long)size,(long long)start,(long long)n);
+    if (n<0) { if (file_trace()) printf("File trace: read(fd %d %s, %llu) failed, errno %d\n",fd,traced_path(fd),(unsigned long long)size,errno); return -errno; }
+    __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
+    return n;
+}
+static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
+    int device=device_of(fd);
+    if (device) { touch_for_write(buffer,size); return device_read(device,buffer,size); }
+    int h=host_fd(fd);
+    if (h<0) return -EBADF;
+    touch_for_write(buffer,size);
+    const uint64_t wait_start=runtime_wait_begin();
+    ssize_t n=pread(h,buffer,size,offset);
+    if (n<(ssize_t)size) n=finish_short_read(fd,h,buffer,size,offset,n);
+    runtime_wait_end("file pread",wait_start,"bytes",(long long)size);
+    if (file_trace_level()==2) printf("File trace: pread(fd %d %s, %llu @%lld) -> %lld\n",fd,traced_path(fd),(unsigned long long)size,(long long)offset,(long long)n);
+    if (n<0) { if (file_trace()) printf("File trace: pread(fd %d %s, %llu @%lld) failed, errno %d\n",fd,traced_path(fd),(unsigned long long)size,(long long)offset,errno); return -errno; }
+    __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
+    return n;
+}
+static int64_t do_write(int fd,const void *buffer,uint64_t size) {
+    if (device_of(fd)) return (int64_t)size; /* devices discard writes */
+    int h=host_fd(fd);
+    if (h<0) return -EBADF;
+    ssize_t n=host_write(h,buffer,size);
+    if (file_trace()) printf("File trace: write(fd %d %s, %llu) -> %lld\n",fd,traced_path(fd),(unsigned long long)size,(long long)(n<0 ? -errno : n));
+    if (n<0) return -errno;
+    __atomic_add_fetch(&writes,1,__ATOMIC_RELAXED);
+    return n;
+}
+static int64_t do_pwrite(int fd,const void *buffer,uint64_t size,int64_t offset) {
+    if (device_of(fd)) return (int64_t)size;
+    int h=host_fd(fd);
+    if (h<0) return -EBADF;
+    ssize_t n=pwrite(h,buffer,size,offset);
+    if (file_trace()) printf("File trace: pwrite(fd %d %s, %llu @%lld) -> %lld\n",fd,traced_path(fd),(unsigned long long)size,(long long)offset,(long long)(n<0 ? -errno : n));
+    return n<0 ? -errno : n;
+}
+static int64_t do_lseek(int fd,int64_t offset,int whence) {
+    File *f=get(fd);
+    if (!f) return -EBADF;
+    if (whence<0 || whence>2) return -EINVAL;
+    if (f->device) return 0;
+    if (f->dir) {
+        /* Directory offsets are entry indices for getdirentries. */
+        if (whence==0 && offset>=0) { f->position=(size_t)offset; return offset; }
+        return -EINVAL;
+    }
+    int64_t r=host_lseek(f->host,offset,whence);
+    return r<0 ? -errno : r;
+}
+static int64_t do_fstat(int fd,GuestStat *out) {
+    if (device_of(fd)) {
+        if (!out) return -EFAULT;
+        memset(out,0,sizeof(*out)); out->mode=020777; /* S_IFCHR | 0777 */
+        return 0;
+    }
+    int h=host_fd(fd);
+    HostStat s;
+#ifdef _WIN32
+    if (h<0) { /* directory: a listing only, stat the path it was opened with */
+        File *f=get(fd); char path[1024];
+        if (!f || !f->dir) return -EBADF;
+        if (!out) return -EFAULT;
+        if (translate(f->path,path,sizeof(path)) || host_stat(path,&s)) return -EBADF;
+        convert_stat(&s,out); path_identity(path,out); return 0;
+    }
+#else
+    if (h<0) return -EBADF;
+#endif
+    if (!out) return -EFAULT;
+    if (host_fstat(h,&s)) return -errno;
+    convert_stat(&s,out);
+#ifdef _WIN32
+    file_identity((HANDLE)_get_osfhandle(h),out);
+#endif
+    return 0;
+}
+static int64_t do_stat(const char *guest,GuestStat *out) {
+    char path[1024]; HostStat s;
+    if (device_kind(guest)) {
+        if (!out) return -EFAULT;
+        memset(out,0,sizeof(*out)); out->mode=020777;
+        return 0;
+    }
+    int e=translate(guest,path,sizeof(path));
+    if (e) return -e;
+    if (!out) return -EFAULT;
+    if (host_stat(path,&s)) { e=errno; if (file_trace() && !game_path(guest)) printf("File trace: stat(%s) -> errno %d\n",guest,e); return -e; }
+    if (file_trace() && !game_path(guest)) printf("File trace: stat(%s) -> %lld bytes\n",guest,(long long)s.st_size);
+    convert_stat(&s,out);
+#ifdef _WIN32
+    path_identity(path,out);
+#endif
+    return 0;
+}
+static int64_t do_getdents(int fd,char *buffer,uint64_t size,int64_t *basep) {
+    pthread_mutex_lock(&lock);
+    File *f=get(fd);
+    int64_t result=0;
+    if (!f) result=-EBADF;
+    else if (!f->dir) result=-EINVAL;
+    else if (!buffer) result=-EFAULT;
+    else if (size<512) result=-EINVAL;
+    else {
+        if (basep) *basep=(int64_t)f->position;
+        uint64_t written=0;
+        while (f->position<f->dir->count) {
+            const char *name=f->dir->names+f->dir->offsets[f->position];
+            size_t n=strlen(name); if (n>255) n=255;
+            uint16_t reclen=(uint16_t)((8+n+1+7)&~(size_t)7);
+            if (written+reclen>size) break;
+            char *p=buffer+written;
+            memset(p,0,reclen);
+            uint32_t ino=(uint32_t)f->position+1;
+            memcpy(p,&ino,4); memcpy(p+4,&reclen,2);
+            p[6]=(char)f->dir->types[f->position]; p[7]=(char)n;
+            memcpy(p+8,name,n);
+            written+=reclen; ++f->position;
+        }
+        result=(int64_t)written;
+    }
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+static int64_t path_op(const char *guest,int op,int mode) {
+    if (game_path(guest)) return -EROFS;
+    char path[1024];
+    int e=translate(guest,path,sizeof(path));
+    if (e) return -e;
+    int r= op==0 ? mkdir(path,mode ? mode : 0755) : op==1 ? rmdir(path) : unlink(path);
+    if (r) r=-errno;
+    if (file_trace()) printf("File trace: %s(%s) -> %d\n",op==0 ? "mkdir" : op==1 ? "rmdir" : "unlink",guest,r);
+    return r;
+}
+static int64_t do_rename(const char *from,const char *to) {
+    if (game_path(from) || game_path(to)) return -EROFS;
+    char a[1024],b[1024];
+    int e=translate(from,a,sizeof(a));
+    if (!e) e=translate(to,b,sizeof(b));
+    if (e) return -e;
+#ifdef _WIN32
+    /* POSIX rename replaces an existing target; the CRT's fails. */
+    int r=MoveFileExA(a,b,MOVEFILE_REPLACE_EXISTING) ? 0 : -compat_errno_from_win32(GetLastError());
+#else
+    int r=rename(a,b) ? -errno : 0;
+#endif
+    if (file_trace()) printf("File trace: rename(%s, %s) -> %d\n",from,to,r);
+    return r;
+}
+static int64_t do_ftruncate(int fd,int64_t length) {
+    int h=host_fd(fd);
+    if (h<0) return -EBADF;
+    if (file_trace()) printf("File trace: ftruncate(fd %d %s, %lld)\n",fd,traced_path(fd),(long long)length);
+#ifdef _WIN32
+    return _chsize_s(h,length) ? -errno : 0;
+#else
+    return ftruncate(h,length) ? -errno : 0;
+#endif
+}
+static int64_t do_truncate(const char *guest,int64_t length) {
+    if (game_path(guest)) return -EROFS;
+    char path[1024];
+    int e=translate(guest,path,sizeof(path));
+    if (e) return -e;
+    if (file_trace()) printf("File trace: truncate(%s, %lld)\n",guest,(long long)length);
+#ifdef _WIN32
+    int h=open(path,O_RDWR|O_BINARY);
+    if (h<0) return -errno;
+    int r=_chsize_s(h,length) ? -errno : 0;
+    close(h);
+    return r;
+#else
+    return truncate(path,length) ? -errno : 0;
+#endif
+}
+static int64_t do_fsync(int fd) { int h=host_fd(fd); if (h<0) return -EBADF; return fsync(h) ? -errno : 0; }
+
+/* Convention adapters: sceKernel* -> Orbis error codes, POSIX -> -1 + errno. */
+static int64_t sce(int64_t r) { return r<0 ? ERR(runtime_guest_errno((int)-r)) : r; }
+static int64_t posix(int64_t r) { if (r<0) { *runtime_errno()=runtime_guest_errno((int)-r); return -1; } return r; }
+#define SCE(name,params,args) static ABI int64_t sce_##name params { return sce(do_##name args); }
+SCE(open,(const char *p,int f,int m),(p,f,m))
+SCE(close,(int fd),(fd))
+SCE(read,(int fd,void *b,uint64_t n),(fd,b,n))
+SCE(pread,(int fd,void *b,uint64_t n,int64_t o),(fd,b,n,o))
+SCE(write,(int fd,const void *b,uint64_t n),(fd,b,n))
+SCE(pwrite,(int fd,const void *b,uint64_t n,int64_t o),(fd,b,n,o))
+SCE(lseek,(int fd,int64_t o,int w),(fd,o,w))
+SCE(fstat,(int fd,GuestStat *s),(fd,s))
+SCE(stat,(const char *p,GuestStat *s),(p,s))
+SCE(getdents,(int fd,char *b,uint64_t n,int64_t *base),(fd,b,n,base))
+SCE(rename,(const char *a,const char *b),(a,b))
+SCE(ftruncate,(int fd,int64_t l),(fd,l))
+SCE(truncate,(const char *p,int64_t l),(p,l))
+SCE(fsync,(int fd),(fd))
+/* sceKernelGetdents(fd, buf, size): sceKernelGetdirentries without the base offset. */
+static ABI int64_t sce_getdents_only(int fd,char *b,uint64_t n) { return sce(do_getdents(fd,b,n,NULL)); }
+/* POSIX fstat: -1 and errno. */
+static ABI int64_t posix_fstat(int fd,GuestStat *s) { return posix(do_fstat(fd,s)); }
+/* sceKernelUtimes(path, times[2]): set access and modification times (FreeBSD timevals: int64
+ * seconds, int64 microseconds; NULL means now). The game package is read-only. */
+static ABI int64_t sce_utimes(const char *guest,const int64_t *times) {
+    if (game_path(guest)) return ERR(30);
+    char path[1024];
+    const int e=translate(guest,path,sizeof(path));
+    if (e) return sce(-e);
+#ifdef _WIN32
+    struct __utimbuf64 t;
+    if (times) { t.actime=times[0]; t.modtime=times[2]; }
+    return _utime64(path,times ? &t : NULL) ? sce(-errno) : 0;
+#else
+    struct timeval t[2];
+    if (times) { t[0].tv_sec=times[0]; t[0].tv_usec=times[1]; t[1].tv_sec=times[2]; t[1].tv_usec=times[3]; }
+    return utimes(path,times ? t : NULL) ? sce(-errno) : 0;
+#endif
+}
+static ABI int64_t posix_read(int fd,void *b,uint64_t n) { return posix(do_read(fd,b,n)); }
+static ABI int64_t posix_write(int fd,const void *b,uint64_t n) { return posix(do_write(fd,b,n)); }
+static ABI int64_t sce_mkdir(const char *p,int m) { return sce(path_op(p,0,m)); }
+static ABI int64_t sce_rmdir(const char *p) { return sce(path_op(p,1,0)); }
+static ABI int64_t sce_unlink(const char *p) { return sce(path_op(p,2,0)); }
+
+static const RuntimeExport exports[]={
+    {"sceKernelOpen",sce_open},
+    {"sceKernelClose",sce_close},
+    {"sceKernelRead",sce_read}, {"_read",posix_read},
+    {"sceKernelPread",sce_pread},
+    {"sceKernelWrite",sce_write}, {"_write",posix_write},
+    {"sceKernelPwrite",sce_pwrite},
+    {"sceKernelLseek",sce_lseek},
+    {"sceKernelFstat",sce_fstat},
+    {"sceKernelStat",sce_stat},
+    {"sceKernelGetdirentries",sce_getdents}, {"sceKernelGetdents",sce_getdents_only},
+    {"fstat",posix_fstat}, {"sceKernelUtimes",sce_utimes},
+    {"sceKernelRename",sce_rename},
+    {"sceKernelFtruncate",sce_ftruncate},
+    {"sceKernelTruncate",sce_truncate},
+    {"sceKernelFsync",sce_fsync},
+
+    {"sceKernelMkdir",sce_mkdir},
+    {"sceKernelRmdir",sce_rmdir},
+    {"sceKernelUnlink",sce_unlink},
+};
+uintptr_t runtime_file_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+/* Host-side helpers for other modules (e.g. SaveData, Fios). */
+int64_t runtime_file_open(const char *p,int f,int m) { return do_open(p,f,m); }
+int64_t runtime_file_close(int fd) { return do_close(fd); }
+int64_t runtime_file_read(int fd,void *b,uint64_t n) { return do_read(fd,b,n); }
+int64_t runtime_file_pread(int fd,void *b,uint64_t n,int64_t o) { return do_pread(fd,b,n,o); }
+int runtime_file_translate(const char *guest,char *out,size_t size) { return translate(guest,out,size); }
+void runtime_file_report(void) {
+    printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
+           opens,reads,(unsigned long long)bytes_read,writes,missing);
+}
+
