@@ -1013,10 +1013,7 @@ int main(int argc, char **argv) {
     if (!cpu_only) runtime_game_set_image(image); /* settings.ini frame_rate, applied at each flip */
     printf("Entering original x86-64 code at guest offset 0x%" PRIx64 "\n", entry);
     entered_game=1;
-    if (!cpu_only && deception_skip_intro() && guest_argc<=GUEST_ARGS) {
-        guest_argv[guest_argc++]="-nosplash";
-        puts("Intro: skipped (settings.ini skip_intro=1): the game starts with -nosplash");
-    }
+    if (!cpu_only) runtime_intro_start(app0);
     struct { uint64_t argc; const char *argv[GUEST_ARGS+2]; } params = {(uint64_t)guest_argc, {NULL}};
     memcpy(params.argv,guest_argv,sizeof(guest_argv));
     for (int i=1;i<guest_argc;++i) printf("Runtime: game argument %s\n",guest_argv[i]);

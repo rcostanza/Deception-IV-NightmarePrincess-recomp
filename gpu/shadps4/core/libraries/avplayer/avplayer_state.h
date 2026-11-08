@@ -90,7 +90,6 @@ private:
     std::atomic_uint32_t m_some_event_result{};
 
     std::shared_mutex m_source_mutex{};
-    bool m_title_movie = false; // deception: this player shows the title screen (skip_intro)
     std::mutex m_state_machine_mutex{};
     std::mutex m_event_handler_mutex{};
     Kernel::Thread m_controller_thread{};

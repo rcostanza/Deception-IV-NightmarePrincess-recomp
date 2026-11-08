@@ -279,25 +279,6 @@ static void select_hold(PadData *d, SDL_Gamepad *g, uint64_t now) {
     if (now<tap_until) d->buttons|=bits;
 }
 
-/* Game's pad read (sample): settings.ini title_back_exits. Back (Circle: B, Escape, Backspace, or
- * the pad file) pressed on the
- * title screen, where the game itself ignores it, asks whether to close the game (the overlay's
- * exit prompt); that press does not reach the game. The title screen is up while its movie plays
- * (runtime_pad_title_movie). */
-static _Atomic int title_showing;
-static void title_back(PadData *d) {
-    static bool was_down;
-    /* An overlay's input (the prompt answered No with Circle) counts as held: a new press opens it. */
-    if (deception_gpu_overlay_captures_input()) { was_down=true; return; }
-    const bool down=(d->buttons & BTN_CIRCLE)!=0;
-    const bool pressed=down && !was_down;
-    was_down=down;
-    if (!pressed || !atomic_load(&title_showing) || !deception_title_back_exits()) return;
-    d->buttons&=~BTN_CIRCLE;
-    deception_exit_prompt_open();
-    puts("Runtime: Back on the title screen; asking whether to close the game");
-}
-
 /* Host thread: samples every millisecond (SDL_DelayNS waits on a high resolution timer) and
  * passes the game's vibration on: when it changes, and every 500 ms while the motors run, as each
  * rumble is sent for 1000 ms. */
@@ -441,31 +422,9 @@ static void replay_sample(PadData *d) {
     d->l2=s->l2; d->r2=s->r2;
 }
 
-/* settings.ini skip_intro: the game starts with -nosplash (loader.c), which leaves its title screen
- * ("Press X to start"), the only screen that plays video/title.mp4. While the first title movie of
- * the run plays (AvPlayer reports it, gpu/shadps4/.../avplayer_state.cpp), Cross is tapped for
- * 100 ms every 500 ms from 1 s in, as the player would; the press closes the movie, which ends the
- * taps, so none reaches the main menu. Later title screens (after the attract demo, or Back from
- * the menu) are left alone. */
-enum { TITLE_NONE, TITLE_PLAYING, TITLE_DONE };
-static _Atomic int title_movie=TITLE_NONE;
-static _Atomic uint64_t title_since;
-void runtime_pad_title_movie(int playing) {
-    atomic_store(&title_showing,playing!=0);
-    if (!deception_skip_intro()) { if (playing) puts("Intro: title screen"); return; }
-    if (playing) {
-        int none=TITLE_NONE;
-        if (!atomic_compare_exchange_strong(&title_movie,&none,TITLE_PLAYING)) return;
-        atomic_store(&title_since,now_us());
-        puts("Intro: title screen; pressing Cross for the main menu (skip_intro=1)");
-    } else if (atomic_exchange(&title_movie,TITLE_DONE)==TITLE_PLAYING) {
-        puts("Intro: title screen left");
-    }
-}
+/* settings.ini skip_intro: Cross taps that confirm the autosave notice (src/runtime_intro.c). */
 static void title_press(PadData *d) {
-    if (atomic_load(&title_movie)!=TITLE_PLAYING) return;
-    const uint64_t t=now_us()-atomic_load(&title_since);
-    if (t>=1000000 && (t-1000000)%500000<100000) d->buttons|=BTN_CROSS;
+    if (runtime_intro_cross()) d->buttons|=BTN_CROSS;
 }
 
 /* After a dialog closes, buttons still held (the Cross that accepted a name) stay hidden until
@@ -481,7 +440,7 @@ static void sample(PadData *d) {
         d->connected=d->connected_count=1;
     }
     d->timestamp=now_us();
-    if (deception_gpu_overlay_captures_input()) { hold_after_capture=1; click.active=false; title_back(d); return; }
+    if (deception_gpu_overlay_captures_input()) { hold_after_capture=1; click.active=false; return; }
     record_sample(d); /* the click sources as they are: a replay plays them again */
     read_inject();
     replay_sample(d);
@@ -490,7 +449,6 @@ static void sample(PadData *d) {
     if (injected.buttons & BTN_R2) d->r2=255;
     uint8_t *axes[4]={&d->left_x,&d->left_y,&d->right_x,&d->right_y};
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
-    title_back(d);
     play_click(d);
     title_press(d);
     if (hold_after_capture) {

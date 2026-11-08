@@ -130,7 +130,11 @@ void runtime_kernel_set_neo_mode(int enabled);
 int runtime_kernel_neo_mode(void);
 /* skip_intro's title screen press (runtime_pad.c): the AvPlayer reports title.mp4 starting (1) and
  * its player going away (0). */
-void runtime_pad_title_movie(int playing);
+/* settings.ini skip_intro (runtime_intro.c): started before the game's code with the game folder;
+ * told of reads of FILE_PS4/archive00.lnk; asks the pad for Cross while the notice is up. */
+void runtime_intro_start(const char *app0);
+void runtime_intro_archive_read(uint64_t offset, uint64_t size);
+int runtime_intro_cross(void);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
 /* Offline networking (POSIX sockets, libSceHttp extras), PSN libraries and their dialogs, and

@@ -65,8 +65,6 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.startup_aspect_ratio = v.aspect_ratio = ratio;
     } else if (key == "skip_intro") {
         v.skip_intro = Truthy(value);
-    } else if (key == "title_back_exits") {
-        v.title_back_exits = Truthy(value);
     } else if (key == "sharpening") {
         v.sharpening = Truthy(value);
     } else if (key == "hdr") {
@@ -216,7 +214,6 @@ void Load() {
         {"DECEPTION_ASPECT_RATIO", "aspect_ratio"},
         {"DECEPTION_AUDIO_CHANNELS", "audio_channels"},
         {"DECEPTION_SKIP_INTRO", "skip_intro"},     {"DECEPTION_FRAME_RATE", "frame_rate"},
-        {"DECEPTION_TITLE_BACK_EXITS", "title_back_exits"},
         {"DECEPTION_RENDER_RESOLUTION", "render_resolution"},
         {"DECEPTION_HDR", "hdr"},
         {"DECEPTION_SHARPENING", "sharpening"},
@@ -273,13 +270,13 @@ extern "C" int deception_skip_intro(void) {
     return DeceptionSettings::Get().skip_intro ? 1 : 0;
 }
 
-extern "C" int deception_title_back_exits(void) {
-    return DeceptionSettings::Get().title_back_exits.load(std::memory_order_relaxed) ? 1 : 0;
-}
-
 extern "C" int deception_frame_rate(void) {
     return DeceptionSettings::EffectiveFrameRate();
 }
+
+static std::atomic<int> vblank_boost{0};
+extern "C" void deception_set_vblank_boost(int hz) { vblank_boost.store(hz, std::memory_order_relaxed); }
+extern "C" int deception_vblank_boost(void) { return vblank_boost.load(std::memory_order_relaxed); }
 
 extern "C" void deception_set_frame_rate(int rate) {
     DeceptionSettings::Get().frame_rate = rate;

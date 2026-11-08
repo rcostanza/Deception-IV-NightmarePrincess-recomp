@@ -147,9 +147,6 @@ struct Values {
     /// Skip the start-up logos and notices: the game starts with its own -nosplash switch
     /// (src/loader.c); read once, before the game starts. On by default.
     bool skip_intro = true;
-    /// Back (Circle) on the title screen asks whether to close the game (src/runtime_pad.c and
-    /// the overlay's exit prompt); read at each press. On by default.
-    std::atomic<bool> title_back_exits{true};
     /// The game's frame rate: 30, 60, 90, 120, 144 or 180 (DeceptionGraphics::FrameRates). The PS4 vblank
     /// (videoout driver) and the engine's target frame rate (src/runtime_game.c, at each flip)
     /// follow it, so the game speed stays the same; the Display Settings panel changes it live.

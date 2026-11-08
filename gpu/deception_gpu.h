@@ -42,9 +42,6 @@ void deception_display_settings_open(void);
 int deception_display_settings_is_open(void);
 /* Asks "Exit Deception?" (No focused); Yes closes the game as closing its window does. Any thread. */
 void deception_exit_prompt_open(void);
-/* settings.ini title_back_exits (DECEPTION_TITLE_BACK_EXITS, default on): Back on the title screen
- * opens the exit prompt (runtime_pad.c). Any thread. */
-int deception_title_back_exits(void);
 /* Ends the game as closing its window does (any thread). */
 void deception_gpu_request_quit(void);
 /* 1 when settings.ini render_resolution (DECEPTION_RENDER_RESOLUTION) is 4k: the game runs in PS4
@@ -69,6 +66,9 @@ int deception_skip_intro(void);
 int deception_frame_rate(void);
 /* Sets frame_rate (one of 30, 60, 90, 120, 144, 180) until the next start; any thread. */
 void deception_set_frame_rate(int rate);
+/* A vblank rate that overrides the frame rate while nonzero (skip_intro's fast logos). */
+void deception_set_vblank_boost(int hz);
+int deception_vblank_boost(void);
 /* sceCommonDialogInitialize ran (runtime_services.c): the upstream dialog libraries check it. */
 void deception_gpu_common_dialog_initialized(void);
 /* Speaker layout for the game's 7.1 audio (settings.ini audio_channels): 0 automatic (the

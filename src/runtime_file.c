@@ -15,6 +15,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #ifdef _WIN32
@@ -258,6 +259,13 @@ static File *get(int fd) {
  * opens and reads (host path, offset, size). */
 static int file_trace_level(void) { static int v=-1; if (v<0) { const char *e=getenv("DECEPTION_FILE_TRACE"); v=e && (e[0]=='1' || e[0]=='2') ? e[0]-'0' : 0; } return v; }
 static int file_trace(void) { return file_trace_level()>0; }
+/* Seconds since the first trace line (level 2 lines carry it). */
+static double trace_seconds(void) {
+    static struct timespec start; static int started;
+    struct timespec now; clock_gettime(CLOCK_MONOTONIC,&now);
+    if (!started) { start=now; started=1; }
+    return (double)(now.tv_sec-start.tv_sec)+(double)(now.tv_nsec-start.tv_nsec)*1e-9;
+}
 static const char *traced_path(int fd) {
     static const char none[]="?";
     return fd>=3 && fd<MAX_FILES && files[fd].used ? files[fd].path : none;
@@ -458,7 +466,8 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     ssize_t n=pread(h,buffer,size,offset);
     if (n<(ssize_t)size) n=finish_short_read(fd,h,buffer,size,offset,n);
     runtime_wait_end("file pread",wait_start,"bytes",(long long)size);
-    if (file_trace_level()==2) printf("File trace: pread(fd %d %s, %llu @%lld) -> %lld\n",fd,traced_path(fd),(unsigned long long)size,(long long)offset,(long long)n);
+    if (n>0) { const File *f=get(fd); if (f && !strcmp(f->path,"/app0/FILE_PS4/archive00.lnk")) runtime_intro_archive_read((uint64_t)offset,(uint64_t)n); }
+    if (file_trace_level()==2) printf("File trace: %.3f pread(fd %d %s, %llu @%lld) -> %lld\n",trace_seconds(),fd,traced_path(fd),(unsigned long long)size,(long long)offset,(long long)n);
     if (n<0) { if (file_trace()) printf("File trace: pread(fd %d %s, %llu @%lld) failed, errno %d\n",fd,traced_path(fd),(unsigned long long)size,(long long)offset,errno); return -errno; }
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
     return n;

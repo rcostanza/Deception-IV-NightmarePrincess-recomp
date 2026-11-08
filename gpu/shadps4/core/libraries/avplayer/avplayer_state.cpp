@@ -11,25 +11,6 @@
 #include <cctype>
 #include <magic_enum/magic_enum.hpp>
 
-// deception: settings.ini skip_intro presses Cross on the title screen, the one that plays
-// video/title.mp4 (src/runtime_pad.c).
-extern "C" void runtime_pad_title_movie(int playing);
-
-// "title.mp4" as the whole path or its last component, in any case.
-static bool IsTitleMovie(std::string_view path) {
-    constexpr std::string_view name = "title.mp4";
-    if (path.size() < name.size()) {
-        return false;
-    }
-    const size_t start = path.size() - name.size();
-    for (size_t i = 0; i < name.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(path[start + i])) != name[i]) {
-            return false;
-        }
-    }
-    return start == 0 || path[start - 1] == '/' || path[start - 1] == '\\';
-}
-
 namespace Libraries::AvPlayer {
 
 void PS4_SYSV_ABI AvPlayerState::AutoPlayEventCallback(void* opaque, AvPlayerEvents event_id,
@@ -134,9 +115,6 @@ AvPlayerState::AvPlayerState(const AvPlayerInitData& init_data)
 }
 
 AvPlayerState::~AvPlayerState() {
-    if (m_title_movie) {
-        runtime_pad_title_movie(0);
-    }
     {
         std::unique_lock lock(m_source_mutex);
         m_up_source.reset();
@@ -173,10 +151,6 @@ bool AvPlayerState::AddSource(std::string_view path, AvPlayerSourceType source_t
         }
     }
     AddSourceEvent();
-    if (IsTitleMovie(path)) {
-        m_title_movie = true;
-        runtime_pad_title_movie(1);
-    }
     return true;
 }
 

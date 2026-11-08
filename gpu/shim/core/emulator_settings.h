@@ -15,6 +15,7 @@ extern "C" int deception_width_4k(void);  // deception_settings.cpp: the display
 inline bool DeceptionRender4k() { return deception_render_4k() != 0; }
 extern "C" int deception_hdr(void); // deception_settings.cpp: settings.ini hdr
 extern "C" int deception_frame_rate(void); // deception_settings.cpp: frame_rate (30, 60, 90, 120, 144, 180)
+extern "C" int deception_vblank_boost(void); // deception_settings.cpp: skip_intro's fast logos (0: off)
 
 enum GpuReadbacksMode : int { Disabled, Relaxed, Precise };
 
@@ -45,6 +46,7 @@ public:
     // (measurements).
     u32 GetVblankFrequency() {
         static const long fixed = Number("DECEPTION_VBLANK_HZ", -1);
+        if (const int boost = deception_vblank_boost(); boost > 0) return u32(boost);
         return fixed > 0 ? u32(fixed) : u32(std::max(deception_frame_rate(), 60));
     }
     // The vblank period. A display within 0.5 Hz of the vblank rate (a 59.95 Hz panel at the
