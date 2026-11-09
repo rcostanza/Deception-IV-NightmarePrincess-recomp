@@ -8,7 +8,7 @@ The game's own x86-64 code runs directly on the PC: the PS4 system libraries it 
 
 🚨 **No game files are included** 🚨
 
-This requires you to provide a decrypted dump of your own copy of the game. Only tested with **CUSA02859** with **update 1.01**.
+This requires you to provide a decrypted dump of your own copy of the game. Only tested with **CUSA02859** with **update 1.01**, may work with other versions but not guaranteed.
 
 ## Features
 
