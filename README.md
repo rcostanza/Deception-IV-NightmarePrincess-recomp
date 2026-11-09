@@ -18,7 +18,7 @@ This requires you to provide a decrypted dump of your own copy of the game. Only
 - **Aspect ratios (16:9, 4:3, 21:9 and 32:9):** ultrawide shows more of the level to the sides, 4:3
   more above and below, nothing stretched. The menus stay 16:9.
 - **DLC support** from your own DLC dumps.
-- **Built in skip intro:** (optionally) boots straight to the main menu (about 5 s): the logos, the autosave notice and the title screen are skipped (the title screen stays when there is no save yet).
+- **Built in skip intro:** (optionally) boots straight to the title menu (NEW GAME / CONTINUE) in about 6 s: the logos, the autosave notice and "Press ANY button" are skipped.
 - **Display settings in the game:** press **F10**, or hold **Select** (View, Back, Share) for two
   seconds, for window mode, resolution, VSync, frame rate and more.
 - **Keyboard and any gamepad.** DualShock 4 and DualSense work as they are, Xbox-style pads by

@@ -40,5 +40,5 @@ to it (or pass `--game DIR` to `run.py`). Tests that need it skip without it.
 - The engine takes its own command-line switches (strings in the eboot: `-nosplash`, `-no_video`,
   `-no_level_intro`, ...); pass them with `python run.py --guest-arg <switch>`.
 - `skip_intro=1` (settings.ini, default): src/runtime_intro.c runs the vblank fast and taps Cross
-  through the logos, the autosave notice and the title's Continue, keyed on the archive entries the
-  game reads; a start lands in the main menu (title screen when there is no save).
+  through the logos and the autosave notice, then one Cross on "Press ANY button", keyed on the
+  archive entries the game reads; a start lands on the title menu (NEW GAME / CONTINUE).
