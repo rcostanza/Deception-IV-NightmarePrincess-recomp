@@ -16,8 +16,6 @@
 #include "deception_overlay.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
-// deception: settings.ini frame_rate onto the engine's frame clock, at each flip (src/runtime_game.c).
-extern "C" void runtime_game_frame_rate(void);
 
 namespace Libraries::VideoOut {
 
@@ -157,7 +155,6 @@ s32 PS4_SYSV_ABI sceVideoOutIsFlipPending(s32 handle) {
 }
 
 s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode, s64 flipArg) {
-    runtime_game_frame_rate();
     auto* port = driver->GetPort(handle);
     if (!port) {
         LOG_ERROR(Lib_VideoOut, "Invalid handle = {}", handle);

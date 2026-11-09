@@ -17,11 +17,6 @@ inline constexpr std::array<std::string_view, DisplayModeCount> DisplayModeKeys 
 inline constexpr std::array<const char*, DisplayModeCount> DisplayModeNames = {
     "Windowed", "Borderless", "Fullscreen"};
 
-/// The game's frame rates (settings.ini frame_rate): each keeps the game's speed and its enemy
-/// spawns; from 220 on enemies stop spawning. 30 is a cap for PCs that cannot hold 60: the engine
-/// steps twice as far a frame.
-inline constexpr std::array<int, 6> FrameRates = {30, 60, 90, 120, 144, 180};
-
 template <typename T, std::size_t N>
 constexpr int IndexOf(const std::array<T, N>& values, const T& value, int fallback) {
     for (std::size_t i = 0; i < N; ++i) {

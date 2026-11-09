@@ -694,8 +694,8 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
 }
 
 void VideoOutDriver::PresentThread(std::stop_token token) {
-    // deception: the vblank follows settings.ini frame_rate, which the Display Settings panel
-    // changes while the game runs: the period, timer and display lock are redone at a change.
+    // deception: the vblank is the PS4's 60 Hz, raised for a moment by skip_intro's fast logos:
+    // the period, timer and display lock are redone at a change.
     std::chrono::nanoseconds vblank_period = EmulatorSettings.GetVblankPeriod();
 
     Common::SetCurrentThreadName("shadPS4:PresentThread");
@@ -703,16 +703,15 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     Common::AccurateTimer timer{vblank_period};
 
-    // deception: one flip per vblank (settings.ini frame_rate: 60 to 180; at 30 the game itself flips every second vblank) on any display.
-    // Deception runs its game logic once per flip at its own target rate (set to match,
-    // src/runtime_game.c), so following a faster display ran the game at double speed.
+    // deception: the PS4's vblank on any display: Deception flips every second vblank and runs its
+    // game logic once per flip, so following a faster display would run the game faster.
     int vblank_hz = int(EmulatorSettings.GetVblankFrequency());
     std::printf("VideoOut: vblank %.3f Hz\n", 1e9 / vblank_period.count());
-    // deception: DECEPTION_VBLANK_HZ keeps the vblank off frame_rate while the engine still follows
+    // deception: DECEPTION_VBLANK_HZ moves the vblank off 60 Hz while the engine still follows
     // it: any other rate changes the game's speed. Said loudly, since an environment variable
     // left from a measurement outlives it.
     if (const char* value = std::getenv("DECEPTION_VBLANK_HZ"); value && value[0]) {
-        std::printf("VideoOut: WARNING: DECEPTION_VBLANK_HZ=%s overrides frame_rate; the game runs at "
+        std::printf("VideoOut: WARNING: DECEPTION_VBLANK_HZ=%s overrides the 60 Hz vblank; the game runs at "
                     "another speed unless they match (measurements only)\n", value);
     }
 
@@ -749,7 +748,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             // settled at 10.3 ms frames (97 FPS, the game at 81% speed); the timer held 120.0.
             follow_display = false;
             on_display = false;
-            std::printf("VideoOut: vblank %.3f Hz (frame_rate %d)\n", 1e9 / vblank_period.count(), hz);
+            std::printf("VideoOut: vblank %.3f Hz (%d)\n", 1e9 / vblank_period.count(), hz);
         }
         bool display_tick = follow_display && DeceptionSettings::Get().vsync &&
                             DeceptionWaitForVblank();

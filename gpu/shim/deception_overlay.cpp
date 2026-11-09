@@ -119,7 +119,7 @@ constexpr auto kResolutionSettle = std::chrono::seconds(1);
 // guarded by imgui_mutex.
 std::atomic<bool> exit_open{false};
 int exit_focus = 0;
-enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowSharpen, RowHdr, RowCount };
+enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowSharpen, RowCount };
 
 // The colours of the game's own menus (Main Menu, Options): teal bars on a dark, see-through
 // backdrop inside a thin cyan frame.
@@ -377,7 +377,6 @@ void ChangeDisplayRow(int row, int delta) {
         break;
     }
     case RowSharpen: s.sharpening = !s.sharpening; break;
-    case RowHdr: s.hdr = !s.hdr; break;
     default: return;
     }
     display_dirty = true;
@@ -445,17 +444,6 @@ DisplayRowText DisplayRowAt(int row) {
         return {"Sharpening", s.sharpening ? "On" : "Off",
                 "AMD FSR 1 RCAS sharpening of the picture at the window's size: crisper edges and detail, "
                 "without halos. Costs well under a millisecond a frame. Applies at once; F9 switches it over the game."};
-    case RowHdr: {
-        std::string text = s.hdr ? "On" : "Off";
-        if (s.hdr != s.startup_hdr) {
-            text += "  (after restart)";
-        } else if (s.hdr && s.hdr_display == 0) {
-            text += "  (this display has no HDR)";
-        }
-        return {"HDR", text,
-                "The game's own HDR output, for an HDR display (in Windows, turn on Use HDR in Display "
-                "settings first). Applies after a restart."};
-    }
     default: return {"", "", ""};
     }
 }

@@ -12,7 +12,6 @@ int deception_gpu_overlay_captures_input(void) { return 0; }
 int deception_skip_intro(void) { return 0; }
 int deception_display_settings_is_open(void) { return 0; }
 void deception_display_settings_open(void) {}
-int deception_title_back_exits(void) { return 1; }
 void deception_exit_prompt_open(void) {}
 uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *name) {
     (void)table; (void)count; (void)name;

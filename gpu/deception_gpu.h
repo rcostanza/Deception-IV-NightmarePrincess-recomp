@@ -51,13 +51,7 @@ int deception_hdr(void);
  * to the title menu (src/runtime_intro.c). Valid once deception_gpu_init
  * returned. */
 int deception_skip_intro(void);
-/* settings.ini frame_rate (DECEPTION_FRAME_RATE): 30, 60, 90, 120, 144 or 180; the Display Settings panel
- * changes it while the game runs. The PS4 vblank runs at it and the engine's target frame rate is set to
- * match at each flip (runtime_game.c). Valid once deception_gpu_init returned; any thread. */
-int deception_frame_rate(void);
-/* Sets frame_rate (one of 30, 60, 90, 120, 144, 180) until the next start; any thread. */
-void deception_set_frame_rate(int rate);
-/* A vblank rate that overrides the frame rate while nonzero (skip_intro's fast logos). */
+/* A vblank rate that overrides the 60 Hz vblank while nonzero (skip_intro's fast logos). */
 void deception_set_vblank_boost(int hz);
 int deception_vblank_boost(void);
 /* sceCommonDialogInitialize ran (runtime_services.c): the upstream dialog libraries check it. */

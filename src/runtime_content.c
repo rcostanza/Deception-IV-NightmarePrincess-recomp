@@ -129,7 +129,7 @@ static void scan_addons(void) {
 }
 /* sceAppContentGetAddcontInfo(service, label, info): the one add-on of `label` (17-byte
  * entitlement label) in the list's form, or DRM_NO_ENTITLEMENT when no folder has that label.
- * Deception asks for each of its ships and skins this way. */
+ * Deception asks for each of its add-ons (DLC0000000000001, ...) this way. */
 static ABI int32_t addon_info(uint32_t service,const char *label,void *info) {
     require_initialized();
     if (service) { fputs("STOP: nonzero AppContent service label unsupported\n",stderr); exit(21); }

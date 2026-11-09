@@ -99,11 +99,12 @@ In WSL the game runs on Mesa's software Vulkan (llvmpipe): slow, but enough for 
 
 ## 4. Run from the source tree
 
-Point `run.py` at your decrypted dump (CUSA00038, version 1.10: `eboot.bin`, `sce_module`,
-`sce_sys`, `audio.pck`, `stream.dat`) with `--game DIR` or `DECEPTION_GAME_DIR`:
+Point `run.py` at your decrypted dump (CUSA02859: `eboot.bin`, `sce_module`, `sce_sys`,
+`FILE_PS4`) with `--game DIR` or `DECEPTION_GAME_DIR`, and at its update (version 1.01) with
+`--update DIR` or `DECEPTION_UPDATE_DIR`:
 
 ```bash
-python run.py --game <dump> --timeout 20
+python run.py --game <dump> --update <dump>-patch --timeout 20
 ```
 
 `run.py` prepares `out/game/` from the dump when needed and starts the game with the MSYS2 DLLs on

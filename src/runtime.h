@@ -43,13 +43,8 @@ void runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size);
 /* Logs "Game: ..." (param.sfo TITLE_ID and APP_VER, and the eboot's SHA-256 from analysis.json
  * beside the image). */
 void runtime_game_identify(const char *title_id, const char *app_version, const char *app0, const char *image_path);
-/* The loaded image, for runtime_game_frame_rate. */
-void runtime_game_set_image(unsigned char *image);
 /* DECEPTION_TRACE_CALLS: log the return values of the listed call sites (development). */
 void runtime_game_trace_calls(unsigned char *image);
-/* At each flip, on the game's thread (videoout, gnmdriver): settings.ini frame_rate onto the
- * engine's frame clock when they differ. */
-void runtime_game_frame_rate(void);
 const char *runtime_import_name(const char *name);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);

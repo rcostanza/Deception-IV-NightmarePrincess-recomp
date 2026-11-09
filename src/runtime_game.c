@@ -50,9 +50,6 @@ void runtime_game_identify(const char *title_id, const char *app_version, const 
            build ? "known build " : "a build the runner was not checked with",build ? build : "");
 }
 
-/* Deception's frame-rate hook is not written yet: the game runs at its own rate. */
-void runtime_game_set_image(unsigned char *image) { (void)image; }
-void runtime_game_frame_rate(void) {}
 
 /* DECEPTION_TRACE_CALLS=<offset>[,<offset>...] (hex guest offsets of `call rel32` instructions):
  * each call goes through a stub that logs the callee's return value (rax). A development aid for

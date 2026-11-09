@@ -67,14 +67,15 @@ LIBS_MANIFEST = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 {files}</assembly>
 """
 
-README = """Deception on PC
+README = """Deception IV: The Nightmare Princess on PC
 Release {release}
 
-You need a decrypted dump of your own copy of the PS4 game (CUSA00038, version 1.10): the folder
-with eboot.bin, sce_module, sce_sys, audio.pck and stream.dat. No game files are included. Add-ons
-you own (ships and skins) need no files: a DLC folder with their sce_sys folders lists them.
+You need a decrypted dump of your own copy of the PS4 game (CUSA02859): the folder with
+eboot.bin, sce_module, sce_sys and FILE_PS4. Its update (version 1.01) and DLC dumps are optional;
+shadPS4's <game>-patch and dlc/CUSA02859 folders work as they are. No game files are included.
 
-1. Run deception-setup.exe. Pick the game folder and where your saves go, then press Install.
+1. Run deception-setup.exe. Pick the game folder (and its update and DLC folders, if you have
+   them) and where your saves go, then press Install.
    It prepares the game from your dump (a few seconds) and offers a desktop shortcut.
 2. Press Play Game, or later start deception.exe or the shortcut.
 
@@ -82,39 +83,40 @@ Run deception-setup.exe again to change the game or save folder. After unpacking
 over this folder, run it once more: it keeps your folders and settings.
 
 In the game: F10, or Select (Share/View) held for two seconds, opens the display settings (window,
-resolution, VSync, 60/90/120/144/180 FPS); F4, or Back on the title screen, asks to close the game.
+resolution, VSync, sharpening); F4 asks to close the game.
 
 settings.ini (made by the setup) holds the window, audio and control options; one in your save
 folder is read instead, and the display settings save there. If the game stops, the reason is in
-deception.log, in the log folder of your save folder. Shader caches are kept per PC in
-%LOCALAPPDATA%\\Deception.
+deception.log, in the log folder of your save folder. Shader caches are kept in the shaders
+folder here.
 
 Needs Windows 10/11 x64, a CPU with AVX and a GPU with Vulkan 1.3.{python_note}
 Source and license (GPL-2.0-or-later): see LICENSE.txt.
 {debug_note}"""
-LINUX_README = """Deception on PC (Linux)
+LINUX_README = """Deception IV: The Nightmare Princess on PC (Linux)
 Release {release}
 
-You need a decrypted dump of your own copy of the PS4 game (CUSA00038, version 1.10): the folder
-with eboot.bin, sce_module, sce_sys, audio.pck and stream.dat. No game files are included. Add-ons
-you own (ships and skins) need no files: a DLC folder with their sce_sys folders lists them.
+You need a decrypted dump of your own copy of the PS4 game (CUSA02859): the folder with
+eboot.bin, sce_module, sce_sys and FILE_PS4. Its update (version 1.01) and DLC dumps are optional;
+shadPS4's <game>-patch and dlc/CUSA02859 folders work as they are. No game files are included.
 
 1. Run deception-setup (from a file manager, or ./deception-setup in a terminal). Pick the
    game folder and where your saves go. It prepares the game from your dump (a few seconds) and
    offers an entry in your application menu (Steam's "Add a Non-Steam Game" lists it too).
-   From a terminal it also takes: ./deception-setup --game <dump> [--save <folder>]
+   From a terminal it also takes: ./deception-setup --game <dump> [--update <folder>]
+   [--dlc <folder>] [--save <folder>]
 2. Start the game from the menu entry, or run ./deception.
 
 Run deception-setup again to change the game or save folder. After unpacking a newer release
 over this folder, run it once more: it keeps your folders and settings.
 
 In the game: F10, or Select (Share/View) held for two seconds, opens the display settings (window,
-resolution, VSync, 60/90/120/144/180 FPS); F4, or Back on the title screen, asks to close the game.
+resolution, VSync, sharpening); F4 asks to close the game.
 
 settings.ini (made by the setup) holds the window, audio and control options; one in your save
 folder is read instead, and the display settings save there. If the game stops, the reason is in
-deception.log, in the log folder of your save folder. Shader caches are kept per PC in
-~/.cache/deception.
+deception.log, in the log folder of your save folder. Shader caches are kept in the shaders
+folder here.
 
 Needs Linux x86-64 with glibc 2.39 or newer (SteamOS 3.7, Ubuntu 24.04, Debian 13, Fedora 40 or
 newer), python3 3.10+ for the setup, a CPU with AVX and a GPU with a Vulkan 1.3 driver.

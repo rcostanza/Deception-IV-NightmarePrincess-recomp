@@ -11,7 +11,6 @@
 double DeceptionWindowRefreshRate(); // deception_gpu.cpp: exact rate of the window's display, 0 when unknown
 bool DeceptionWaitForVblank(); // deception_gpu.cpp: waits for the window's display to start a refresh; false when it cannot (not Windows)
 extern "C" int deception_hdr(void); // deception_settings.cpp: settings.ini hdr
-extern "C" int deception_frame_rate(void); // deception_settings.cpp: frame_rate (30, 60, 90, 120, 144, 180)
 extern "C" int deception_vblank_boost(void); // deception_settings.cpp: skip_intro's fast logos (0: off)
 
 enum GpuReadbacksMode : int { Disabled, Relaxed, Precise };

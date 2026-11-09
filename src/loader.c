@@ -1005,7 +1005,6 @@ int main(int argc, char **argv) {
         }
     }
     runtime_game_trace_calls(image);
-    if (!cpu_only) runtime_game_set_image(image); /* settings.ini frame_rate, applied at each flip */
     printf("Entering original x86-64 code at guest offset 0x%" PRIx64 "\n", entry);
     entered_game=1;
     if (!cpu_only) runtime_intro_start(app0);

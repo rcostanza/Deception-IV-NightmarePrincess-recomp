@@ -1,29 +1,28 @@
 <img src="res/deception.png">
 
-# Deception (PS4) - Recompiled to PC
+# Deception IV: The Nightmare Princess (PS4) - Recompiled to PC
 
-An (obviously) unofficial static recompilation of the PS4 version of <b>Deception</b>, Housemarque's awesome shmup exclusive to PS platforms.
+An (obviously) unofficial port of the PS4 version of <b>Deception IV: The Nightmare Princess</b>, KOEI TECMO's trap-laying action game, to Windows and Linux.
 
-The game's own x86-64 code runs directly on Windows and Linux: the PS4 system libraries it calls are reimplemented, and its GPU commands are drawn with Vulkan.
+The game's own x86-64 code runs directly on the PC: the PS4 system libraries it calls are reimplemented, and its GPU commands are drawn with Vulkan.
 
 🚨 **No game files are included** 🚨
 
-This requires you to provide a decrypted dump of your own copy of the game. Only tested with **CUSA00038** with **update 1.10**.
+This requires you to provide a decrypted dump of your own copy of the game. Only tested with **CUSA02859** with **update 1.01**.
 
 ## Features
 
-- **30, 60, 90, 120, 144 or 180 FPS.** Higher framerates maybe possible in the future; 30 is for lower-powered PCs.
-  - Note: if the game fails to reach the set FPS cap, it will run slower. So choose a cap that your device can reach.
-- **4K support** (not native, the game's own checkerboard mode) or 1080p.
-- **Aspect ratios (16:9, 4:3, 21:9 and 32:9):** ultrawide shows more of the level to the sides, 4:3
-  more above and below, nothing stretched. The menus stay 16:9.
-- **DLC support** from your own DLC dumps.
+- **Any window size:** windowed, borderless or fullscreen, at 720p, 900p, 1080p, 1440p, 4K and more. The game renders at its native 1080p and is scaled to the window, with AMD FSR 1 RCAS sharpening.
+- **Aspect ratios (16:9, 4:3, 21:9 and 32:9)** for the window's shape. The game itself stays 16:9, with black bars on other shapes.
+- **Native 30 FPS** at the right game speed (see [Frame rate](#frame-rate)).
+- **Update and DLC support** from your own dumps.
 - **Built in skip intro:** (optionally) boots straight to the title menu (NEW GAME / CONTINUE) in about 6 s: the logos, the autosave notice and "Press ANY button" are skipped.
 - **Display settings in the game:** press **F10**, or hold **Select** (View, Back, Share) for two
-  seconds, for window mode, resolution, VSync, frame rate and more.
+  seconds, for window mode, resolution, VSync and more.
 - **Keyboard and any gamepad.** DualShock 4 and DualSense work as they are, Xbox-style pads by
   button position.
 - **Easy setup:** point the installer at your dump, and it can add a desktop shortcut (on Linux, an application menu entry).
+- **Portable:** saves, settings and shader caches stay in the game's folder (nothing in `%APPDATA%`).
 
 ## Requirements
 
@@ -33,40 +32,46 @@ This requires you to provide a decrypted dump of your own copy of the game. Only
 - A CPU with AVX.
 - A GPU with Vulkan 1.3 and a current driver (on Linux, Mesa or the NVIDIA driver).
 - A decrypted dump of your own copy of the game: the folder with `eboot.bin`, `sce_module`,
-  `sce_sys`, `audio.pck` and `stream.dat`.
-
-A higher frame rate needs a PC that holds it: Deception's game speed follows the frames it shows, so a frame that comes late slows the game down for that moment.
+  `sce_sys` and `FILE_PS4`. Its update (patch) dump is optional but recommended.
 
 ## Install and play
 
 1. [Download the latest release here](https://github.com/rcostanza/deception-recomp/releases/latest)
 2. Unzip the release anywhere, for example `C:\Games\Deception`.
 3. Run `deception-setup.exe`.
-4. Choose your **game folder** (the dump), optionally a **DLC folder**, and a **save folder** (by default `save` inside the release folder). Each row says whether the folder is usable, and **Install** turns on once the game folder holds your dump (and the DLC folder exists, if you named one). Press it: setup prepares the game from your dump in a few seconds and offers a desktop shortcut. Your dumps are only read, never changed.
+4. Choose your **game folder** (the dump), optionally an **update folder** (found by itself when it sits next to the game as `<game>-patch`, as shadPS4 keeps it) and a **DLC folder**, and a **save folder** (by default `save` inside the release folder). Each row says whether the folder is usable, and **Install** turns on once the game folder holds your dump. Press it: setup prepares the game from your dump in a few seconds and offers a desktop shortcut. Your dumps are only read, never changed.
 5. Press **Play Game**. Later, start `deception.exe` or the shortcut.
 
-Run `deception-setup.exe` again any time to change folders; it offers to copy your saves when the save folder moves. Untick **Skip the intro logos** there (or set `skip_intro=0` in `settings.ini`) to see the logos and the title screen again.
+Run `deception-setup.exe` again any time to change folders; it offers to copy your saves when the save folder moves. Untick **Skip the intro** there (or set `skip_intro=0` in `settings.ini`) to see the logos and the title screen again.
+
+The setup also works from the command line:
+
+```
+deception-setup.exe --game <dump> [--update <folder>|--no-update] [--dlc <folder>|--no-dlc]
+                    [--save <folder>] [--skip-intro|--play-intro] [--shortcut desktop]
+```
 
 ### On Linux
 
 1. Extract the release anywhere you can write: `tar -xzf deception-pc-<version>-linux.tar.gz -C ~/Games`
 2. Run `deception-setup`: from a file manager it asks with dialogs, in a terminal it asks there. It also
-   takes `--game <dump> [--save <folder>] [--dlc <folder>]`.
+   takes the same arguments as on Windows (`--game <dump> [--update <folder>] [--save <folder>] [--dlc <folder>]`).
 3. Start the game from the menu entry it adds, or run `./deception`.
 
 On a Steam Deck, do this in Desktop Mode; _Add a Non-Steam Game_ in Steam then lists the menu entry.
 
 ### Updating
 
-Unzip the new release over the old folder and run the setup once more (the game asks you to). Your folders, saves and settings are kept. Setup also remembers the folders in `%APPDATA%\Deception\paths.ini` (Linux: `~/.config/deception/paths.ini`), so a release unzipped somewhere new only needs **Install**.
+Unzip the new release over the old folder and run the setup once more (the game asks you to). Your folders, saves and settings are kept.
 
 ### DLC
 
-Deception's add-ons (the extra ships and skins) carry no data of their own: the game only asks whether each one is installed. A DLC dump is a folder holding `sce_sys`, named after the add-on's label, the end of its content ID (`UP9000-CUSA00038_00-ASTRONAUT0000002` is `ASTRONAUT0000002`):
+A DLC dump is a folder per add-on, named after its label (the end of its content ID), each with its `sce_sys` and `dlc` folders. shadPS4's `dlc/CUSA02859` folder works as it is:
 
 ```
 <folder containing your DLCs>/
-  ASTRONAUT0000002/
+  DLC0000000000001/
+    dlc/
     sce_sys/
   ...
 ```
@@ -79,12 +84,11 @@ Deception's add-ons (the extra ships and skins) carry no data of their own: the 
   that ratio; applied a second after you stop changing it) and monitor. The fullscreen modes pick their
   size from the screen and the aspect ratio, with black bars when the screen is of another shape;
 - VSync, and tearing with VSync off (the least input delay);
-- frame rate: 30, 60, 90, 120, 144 or 180 (30 for PCs that cannot hold 60), held to what your display refreshes at (180 on a 120 Hz display runs at 120) unless VSync is off with tearing allowed;
-- render resolution (4K or 1080p, at the next start);
-- sharpening (AMD FSR 1 RCAS, on by default), applied at once; **F9** also switches it over the game, to compare;
-- HDR, the game's own HDR output on an HDR display (at the next start; on Windows, turn on **Use HDR** in Display settings first).
+- sharpening (AMD FSR 1 RCAS, on by default), applied at once; **F9** also switches it over the game, to compare.
 
-`title_back_exits=0` stops Back on the title screen from asking to close the game.
+### Frame rate
+
+The game runs at 30 FPS, as on PS4. Its logic advances one step per frame, so it cannot be unlocked: the engine has a dormant 60 FPS mode, but with it everything moves at double speed. No other cap is offered for the same reason.
 
 ## Controls
 
@@ -105,12 +109,12 @@ clicks the touchpad. The keyboard works alongside a gamepad:
 | Tab, P                    | Options                  |
 | T                         | touchpad click           |
 
-| Shortcut                                | What it does                                |
-| --------------------------------------- | ------------------------------------------- |
-| **F10**, or hold **Select** 2 s         | Display Settings                            |
-| **F9**                                  | sharpening on or off                        |
-| **F4**, or **Back** on the title screen | asks "Exit Deception?" (No is selected first) |
-| **Alt+F4**                              | closes the game without confirmation        |
+| Shortcut                        | What it does                                  |
+| ------------------------------- | --------------------------------------------- |
+| **F10**, or hold **Select** 2 s | Display Settings                              |
+| **F9**                          | sharpening on or off                          |
+| **F4**                          | asks "Exit Deception?" (No is selected first) |
+| **Alt+F4**                      | closes the game without confirmation          |
 
 ## When something goes wrong
 
@@ -138,4 +142,4 @@ I (human) am a programmer, but I know nothing about C++ which is required to mak
 
 Based on and inspired by [theatrhythm-fbl-pc](https://github.com/YAPhoa/theatrhythm-fbl-pc).
 
-GPL-2.0-or-later, see [LICENSE](LICENSE). Runtime follows [shadPS4](https://github.com/shadps4-emu/shadPS4). Deception is a game by Housemarque, published by Sony Interactive Entertainment; this project is not affiliated with or endorsed by either.
+GPL-2.0-or-later, see [LICENSE](LICENSE). Runtime follows [shadPS4](https://github.com/shadps4-emu/shadPS4). Deception IV: The Nightmare Princess is a game by KOEI TECMO GAMES; this project is not affiliated with or endorsed by them.

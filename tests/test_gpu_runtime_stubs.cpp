@@ -27,7 +27,6 @@ uint64_t runtime_wait_begin() { return 0; }
 void runtime_wait_end(const char*, uint64_t, const char*, long long) {}
 void runtime_report() {}
 int runtime_memory_is_mapped(uintptr_t, uint64_t) { return 0; }
-void runtime_game_frame_rate() {}
 void runtime_pad_title_movie(int) {}
 }
 

@@ -70,11 +70,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "hdr") {
         v.startup_hdr = v.hdr = Truthy(value);
     } else if (key == "frame_rate") {
-        const bool listed = DeceptionGraphics::IndexOf(DeceptionGraphics::FrameRates, i, -1) >= 0;
-        v.frame_rate = listed ? i : 60;
-        if (!value.empty() && !listed) {
-            std::printf("Settings: frame_rate=%s is not 30, 60, 90, 120, 144 or 180; using 60\n", value.c_str());
-        }
+        // An older settings.ini's key: the game runs at its native 30 FPS (its logic steps once
+        // per flip), so the line is dropped on the next save.
     } else if (key == "audio_channels") {
         v.audio_channels = ParseAudioChannels(value);
     } else if (key == "render_resolution") {
@@ -95,7 +92,6 @@ std::vector<std::pair<std::string, std::string>> DisplayKeys() {
         {"output_resolution", std::to_string(v.window_width.load()) + "x" + std::to_string(v.window_height.load())},
         {"vsync", v.vsync ? "1" : "0"},
         {"tearing", v.tearing ? "1" : "0"},
-        {"frame_rate", std::to_string(v.frame_rate.load())},
         {"sharpening", v.sharpening ? "1" : "0"},
         {"hdr", v.hdr ? "1" : "0"},
     };
@@ -208,7 +204,7 @@ void Load() {
         {"DECEPTION_OUTPUT_RESOLUTION", "output_resolution"},
         {"DECEPTION_ASPECT_RATIO", "aspect_ratio"},
         {"DECEPTION_AUDIO_CHANNELS", "audio_channels"},
-        {"DECEPTION_SKIP_INTRO", "skip_intro"},     {"DECEPTION_FRAME_RATE", "frame_rate"},
+        {"DECEPTION_SKIP_INTRO", "skip_intro"},
         {"DECEPTION_HDR", "hdr"},
         {"DECEPTION_SHARPENING", "sharpening"},
     };
@@ -246,35 +242,15 @@ double DisplayRefresh() {
     return refresh.load(std::memory_order_relaxed);
 }
 
-int EffectiveFrameRate() {
-    const auto& v = Get();
-    const int rate = v.frame_rate.load(std::memory_order_relaxed);
-    const double refresh = DisplayRefresh();
-    if ((!v.vsync && v.tearing) || refresh <= 0.0) return rate;
-    int best = DeceptionGraphics::FrameRates[0];
-    for (const int r : DeceptionGraphics::FrameRates) {
-        if (r <= rate && r <= refresh + 0.5) best = std::max(best, r);
-    }
-    return best;
-}
-
 } // namespace DeceptionSettings
 
 extern "C" int deception_skip_intro(void) {
     return DeceptionSettings::Get().skip_intro ? 1 : 0;
 }
 
-extern "C" int deception_frame_rate(void) {
-    return DeceptionSettings::EffectiveFrameRate();
-}
-
 static std::atomic<int> vblank_boost{0};
 extern "C" void deception_set_vblank_boost(int hz) { vblank_boost.store(hz, std::memory_order_relaxed); }
 extern "C" int deception_vblank_boost(void) { return vblank_boost.load(std::memory_order_relaxed); }
-
-extern "C" void deception_set_frame_rate(int rate) {
-    DeceptionSettings::Get().frame_rate = rate;
-}
 
 extern "C" int deception_hdr(void) {
     return DeceptionSettings::Get().startup_hdr ? 1 : 0;

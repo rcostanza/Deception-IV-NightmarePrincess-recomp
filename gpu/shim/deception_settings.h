@@ -130,10 +130,6 @@ struct Values {
     /// Hurry through the start-up logos and confirm the autosave notice (src/runtime_intro.c);
     /// read once, before the game starts. On by default.
     bool skip_intro = true;
-    /// The game's frame rate: 30, 60, 90, 120, 144 or 180 (DeceptionGraphics::FrameRates). The PS4 vblank
-    /// (videoout driver) and the engine's target frame rate (src/runtime_game.c, at each flip)
-    /// follow it, so the game speed stays the same; the Display Settings panel changes it live.
-    std::atomic<int> frame_rate{60};
     /// Speaker layout of the game's audio (AudioChannels), read when the game opens its ports.
     std::atomic<int> audio_channels{AudioChannelsAuto};
     /// FSR 1 RCAS sharpening of the picture as the window shows it (key sharpening,
@@ -154,7 +150,7 @@ Values& Get();
 /// no settings.ini yet (Path()), the default file is copied there so it always holds one.
 void Load();
 
-/// Writes the display keys (display_mode, monitor, aspect_ratio, window, vsync, tearing, frame_rate,
+/// Writes the display keys (display_mode, monitor, aspect_ratio, window, vsync, tearing,
 /// sharpening, hdr) into Path() in place: their lines are replaced, missing ones
 /// appended, the rest kept (from the default file until Path() exists).
 void SaveDisplay();
@@ -166,9 +162,5 @@ void SaveDisplayIfChanged();
 /// Refresh rate of the window's display in Hz (0 unknown), looked up at most every 500 ms.
 double DisplayRefresh();
 
-/// The frame rate the game runs at: frame_rate, lowered to the highest of FrameRates the window's
-/// display refreshes at, since a frame shown later than the engine's target slows the game (it
-/// does not skip frames). VSync off with tearing is not bound to the refresh. Any thread.
-int EffectiveFrameRate();
 
 } // namespace DeceptionSettings

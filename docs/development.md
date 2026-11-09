@@ -5,8 +5,8 @@ How the runner works and how to work on it. Building, tests and packaging are in
 
 ## How it works
 
-The PS4 and the PC are both x86-64, so nothing is recompiled. Deception's `eboot.bin` (Housemarque's
-engine, statically linked, with Wwise for audio) is mapped into memory and run directly. What
+The PS4 and the PC are both x86-64, so nothing is recompiled. Deception's `eboot.bin` (KOEI TECMO's
+engine, statically linked, with its KTSL2 sound library) is mapped into memory and run directly. What
 differs is everything that code calls:
 
 | The game calls | Replaced by |
@@ -28,15 +28,10 @@ The game image is built from the dump by `run.py` (and by the setup in a release
    game. An import with no implementation becomes a trap that prints
    `STOP: first unsupported PS4 import: <name>` and exits.
 
-Every import Deception's three modules make is implemented, and only those: a runtime function the
+Every import Deception's modules make is implemented, and only those: a runtime function the
 game does not import is not kept. `python run.py check` lists any that are missing (none today).
 
-The renderer draws at the game's own resolution (`render_resolution=4k`, the default: PS4 Pro mode,
-`sceKernelIsNeoMode` returns 1 and the video out is 3840x2160; or 1080p) and scales the picture to the
-window in `post_process.frag`. With `sharpening=1` (the default) that pass draws into an image of the
-window's size and FSR 1 RCAS (`rcas.frag`, `host_passes/rcas_pass.cpp`) sharpens it into the frame.
-The only overlay is the PS4's system UI (save list, text entry, trophy notices), the Display Settings
-panel and the exit prompt (`gpu/shim/deception_overlay.cpp`).
+How the picture and the sound are made is below ([Render resolution and aspect ratios](#render-resolution-and-aspect-ratios), [Audio](#audio)).
 
 ## Running from the source tree
 
@@ -51,11 +46,12 @@ python run.py --timeout 20
   run after that many seconds.
 - `python run.py check` lists the imports the runtime cannot resolve, by library (full list in
   `out/game/missing-imports.txt`). `python run.py prepare` rebuilds the image only.
-- `--guest-arg SWITCH` passes one of the engine's own command-line switches (strings in the eboot:
-  `-nosplash`, `-no_video`, `-no_level_intro`, ...).
-- Saves go to `user/` (`--user DIR`), settings to `user/settings.ini`. Shader caches go to one folder
-  per PC, `%LOCALAPPDATA%\Deception` (`~/.cache/deception`), shared with installed copies
-  (`DECEPTION_GPU_USER_DIR` moves it).
+- `--update DIR` (`DECEPTION_UPDATE_DIR`) lays the update dump over the game; `--dlc DIR`
+  (`DECEPTION_DLC_DIR`) adds a DLC folder.
+- `DECEPTION_POKE=<image offset>=<hex bytes>,...` writes bytes into the game image at start, for
+  experiments (`src/runtime_game.c`).
+- Saves go to `user/` (`--user DIR`), settings to `user/settings.ini`. Shader caches go to
+  `shaders/` here, as a release keeps them next to its exe (`DECEPTION_GPU_USER_DIR` moves them).
 - Every `settings.ini` key has an environment variable that overrides it, named in
   `settings.example.ini`. A variable left set in a shell keeps overriding the panel:
   `DECEPTION_VBLANK_HZ` prints a warning at start for that reason.
@@ -82,105 +78,75 @@ import bound to a GOT slot.
 
 ## Frame rate
 
-Deception's game logic advances once per frame, by a step its frame clock fixes: the boot passes the
-constant 59.94 and allows no frame skip, so the game's speed is the rate at which it flips. Raising
-the PS4 vblank alone (shadPS4's approach) runs the game faster, not smoother.
+The game runs at 30 FPS, as on PS4: its logic advances one step per flip, and it flips every second
+vblank of a 60 Hz video out. The engine also holds a dormant 60 FPS mode
+(`DECEPTION_POKE=1f561=7f,1f903=7f,1f589=9090` turns it on: the frame interval it asks for becomes 1
+and the branch that keeps 2 is skipped), but the logic does not scale its step with it: a two-second
+walk covers twice the distance and the menus repeat keys twice as fast. So no frame rate setting is
+offered; the vblank stays at 60 Hz (`GetVblankFrequency`), apart from the skip-intro boost below.
 
-`frame_rate` (30, 60, 90, 120, 144 or 180) sets both. `DeceptionSettings::EffectiveFrameRate()` lowers it to what the
-display refreshes at, unless VSync is off with tearing allowed; the video out's vblank follows it
-(`GetVblankFrequency`, live), and at each flip `runtime_game_frame_rate()` (`src/runtime_game.c`)
-calls the engine's own `set_fps(rate x 0.999)` through the frame clock's vtable (the global at image
-+0x152cd28, vtable image+0xc6c2c8, slot 3), after checking the vtable is the one it expects. A change
-from the panel applies on the next flip. Above about 200 FPS a guard in the spawner (the 0.005 at
-0x94283c) stops enemies spawning, so higher rates are not offered.
-At 30 the vblank stays at 60: with an engine target of 30 the game calls `sceVideoOutSetFlipRate(1)`
-(a flip every second vblank, as the PS4's 30 FPS games do), and back to 0 when the target rises
-again, live switches included; a 30 Hz vblank under that ran it at 15.
+## Render resolution and aspect ratios
 
-After a rate change the present thread paces by its timer instead of following the display: with
-G-Sync, following the display's own timing settled at 97 FPS.
+The game renders at 1920x1080 and has no PS4 Pro mode: it reads only the refresh rate from
+`sceVideoOutGetResolutionStatus` and gives its display buffers and render targets fixed sizes
+(the targets through 0x39ad10, most with sizes computed per pass). The runner reports a base PS4
+(`sceKernelIsNeoMode` 0) and a 1920x1080 video out; `post_process.frag` scales the picture to the
+window, and with `sharpening=1` (the default) FSR 1 RCAS (`rcas.frag`, `host_passes/rcas_pass.cpp`)
+sharpens it at the window's size. A native 4K mode would need every render target and the UI's
+1920-pixel layout scaled; that has not been done.
 
-### CPU writes next to GPU-written bytes
+`aspect_ratio` picks the window's shape: in windowed mode the window has it (its size list holds only
+sizes of that ratio), and the fullscreen modes fit it into the screen
+(`DeceptionSettings::PickFullscreen`). The game's 16:9 picture sits inside with black bars. For
+future work: the 3D projection takes its aspect from one of ten 16:9 float constants in the image
+(0x73b1b0, 0x73b1c4, 0x73b1c8, 0x876ab4, 0x891174, 0x893780, 0x8937b4, 0x894530, 0x895f60, 0x895f8c);
+patched to 21:9 the scene shows more to the sides (squeezed into the 16:9 buffer) while the HUD
+keeps its layout, so a real ultrawide mode would also need wider render targets.
 
-In combat the game's CPU writes records (eboot 0x1c90a7, a copy loop at 0x6c4bf8, CRT copies) into
-pages it shares with small GPU-written buffers: the 5 KiB destination of a compute copy (shader
-0x069f1335) and a 64 KiB storage buffer (0xf003dbab). Page tracking is per 4 KiB page, so each
-such write fault used to download the GPU's bytes first, a `scheduler.Finish()` that waits for the
-whole queue: about 160 a second, 4 ms of GPU idle per frame on a Radeon 890M (73 to 79 FPS at
-1080p). The writes almost never touch a byte the GPU wrote, so `BufferCache::TryMergeWrite` lets
-them go ahead without downloading and keeps a copy of the page's GPU-written bytes; the page's next
-upload (`EmitUploadRange`) leaves out those that the guest has not changed since. Relaxed readback
-mode only (the default), where pages are never read-protected. Toggle `WriteMerge` (bit 50) turns
-it off; `DECEPTION_FRAME_STATS=1` prints the merged writes per second, `DECEPTION_PERF_DIAG=1` the
-downloads that remain with the guest instruction and the GPU writer behind each.
+The only overlay is the PS4's system UI (save list, text entry, trophy notices), the Display
+Settings panel and the exit prompt (`gpu/shim/deception_overlay.cpp`).
 
-### Render resolution
+## Audio
 
-The engine's output size table (1920x1080 on PS4, 3840x2160 on PS4 Pro; eboot 0xa5d120) sets only
-the display buffers and the final pass: patched to 1280x720, the scene's passes still render at
-1920x1080 for the same GPU time, so there is no 720p mode. The scene's sizes are fixed in the
-render scripts in the game data: each target is created by name with its size (`mrt_albedo`
-1920x1080, or 1920x2160 checkerboard in PS4 Pro mode; `ssao_*` at half; `menu_overlay` for the pause
-menu). `DECEPTION_VERBOSE=1` lists the ones a wide picture widens.
-
-### Aspect ratios (4:3, 21:9, 32:9)
-
-The `aspect_ratio` setting picks the picture's shape: in windowed mode the window has it (its size
-list holds only sizes of that ratio), and the fullscreen modes fit it into the screen
-(`DeceptionSettings::PickFullscreen`: borderless the desktop, exclusive the largest mode of the ratio,
-bars otherwise). A shape other than 16:9 is made at start: `DeceptionSettings::WideWidth4k` turns it
-into a width at 2160 lines (2880 for 4:3, 5120 for 2560x1080, 7680 for 32:9; 3840 for 16:9). These
-things make the engine use it:
-
-- the video out is that wide (half in 1080p mode; `emulator_settings.h`). The engine takes its
-  aspect ratio from the video out's size (with the camera correction below, a wider picture keeps
-  the PS4's vertical view and shows more to the sides, Hor+; 4:3 keeps its horizontal view and
-  shows more above and below, Vert+);
-- `runtime_game_widen` (src/runtime_game.c) writes it into the size table, so the display buffers
-  match;
-- the same function puts a jmp to a stub at the start of the engine's three create functions
-  (0x476aa0 render targets, 0x478840 and 0x478910 depth buffers). The stub widens a 16:9 or 8:9
-  (checkerboard) size by width/3840 (narrows it at 4:3) and runs the function's own 17-byte prologue. The main menu's
-  cards (`menu_slide_*`, `dummy_depth*`) keep their size;
-- the engine's perspective has a vertical half-angle of tan(fov/2)/sqrt(1+aspect) (fitted to the
-  main menu's and gameplay camera's matrices at 16:9, 21:9 and 32:9), so on its own a wider picture
-  also sees less above and below (10% at 21:9, 28% at 32:9), pushing the HUD and the menus, drawn
-  in 3D in front of the camera, past the top and bottom. Every camera passes its projection
-  through 0x420bd0 (this, view, projection, fov, near, far, aspect); for perspective cameras of the
-  picture's aspect a stub passes a copy with 16:9's vertical scale (4:3: its horizontal scale,
-  the smaller zoom of the two) and the fov that gives it;
-- at 4:3 the screen's orthographic cameras (x within +-aspect, y +-1) zoom out to 16:9's width:
-  the pause menu is laid out for 16:9 and would lose its sides. All twelve are set once at boot
-  from the same call (0x4226b2), so the main menu's flat layer and backdrop zoom out with it.
-
-The main menu's backdrop only covers the middle 16:9, so the menus show dark sides (dark bands
-above and below at 4:3), and the pause menu darkens only the middle 16:9; the HUD stays within
-16:9's frame too. The shape is set for the run: a changed aspect ratio shows "(after restart)" on
-the Display Settings page.
+The game's sound is KOEI TECMO's KTSL2 mixer on top of Ngs2 (`src/runtime_ngs2.c`). Its racks are
+"Sfx" (256 sampler voices playing ATRAC9 banks), "Stream" (12 voices of 16-bit 6-channel PCM),
+"Movie", the effect racks ("Reverb", "DuckingTrig", "DuckingComp", "MultiFx") and "Mastering".
+The runner mixes the sampler voices (pitch, envelope, port matrices) in the voices' patch order and
+renders the mastering voices' input as 8-channel float; reverb, ducking and filters pass their
+input through. Music (`BGM/BGMLink.g1l`) is ATRAC9 that the game decodes itself through
+`sceAudiodec` (`src/runtime_audiodec.c`, one padded superframe per call) and streams in 512-frame
+blocks to a Stream voice it starts before the first block arrives. `DECEPTION_NGS2_TRACE=1` (2 adds
+state queries) and `DECEPTION_AUDIODEC_TRACE=1` log what the game asks.
 
 ## Starting, the title screen and leaving
 
-With `skip_intro=1` (the default) the loader passes `-nosplash`, then presses Cross once when the
-title screen appears: the AvPlayer opening `title.mp4` marks it (`runtime_pad_title_movie`,
-`src/runtime_pad.c`). A start lands in the main menu.
+With `skip_intro=1` (the default) `src/runtime_intro.c` plays the start as a hurried player would:
+the vblank runs at 600 Hz through the KOEI TECMO and TECMO logos, Cross is tapped on the autosave
+notice, and "Press ANY button" gets one Cross 3 s after its data loads, which opens the title menu
+(NEW GAME / CONTINUE) for the player. Each screen is recognised by the archive entry the game reads
+(`COMMON_WINDOW_G1T`, `TITLEMENU_G1T` in `FILE_PS4/archive00.lnk`, found by name in its `.h`). The
+tap is single on purpose: a second one could choose a menu entry.
 
-On the title screen, Back (Circle, B, Escape) asks "Exit Deception?" (`title_back_exits=1`); F4 asks
-anywhere. The prompt is drawn by the overlay and takes the input while open; Yes pushes the same
-quit event as closing the window. Holding Select (SDL's Back button) for two seconds opens the
-Display Settings panel (F10 too): the button's own press is held back while it is down, and a release
-before two seconds sends it to the game as a short tap.
+F4 asks "Exit Deception?" anywhere. The prompt is drawn by the overlay and takes the input while
+open; Yes pushes the same quit event as closing the window. Holding Select (SDL's Back button) for
+two seconds opens the Display Settings panel (F10 too): the button's own press is held back while it
+is down, and a release before two seconds sends it to the game as a short tap.
 
-## Save data, DLC and trophies
+## Update, save data, DLC and trophies
 
-Saves are folders under `<save>/savedata/<user>/CUSA00038/` (`src/runtime_savedata.c`); Deception keeps
-one, `savedata`. The save list dialog (`runtime_services.c`) lists them newest first.
+The update dump (`--update`, `DECEPTION_UPDATE_DIR`, `update=` in paths.ini) is laid over `/app0`
+as the PS4 does: a file in the update replaces the game's, and directory listings merge both.
 
-Deception's 22 add-ons (ships and skins) are entitlement-only: the game asks
-`sceAppContentGetAddcontInfo` about each label it knows, and an add-on is installed when a folder of
-that name exists in `<save>/addcont/` or in the extra DLC folder (`--dlc`, `DECEPTION_DLC_DIR`;
-shadPS4's `addcont` with its `CUSA00038` folder works as it is). Nothing is read from those folders.
+Saves are folders under `<save>/savedata/<user>/CUSA02859/` (`src/runtime_savedata.c`): the game
+keeps `system0000` and `game-auto`. The save list dialog (`runtime_services.c`) lists them newest
+first.
 
-Trophies come from the dump's `sce_sys/trophy/trophy00.trp` (65, TROP000-064); unlocks are kept in
+Add-ons are folders named after their label (`DLC0000000000001`, ...) in `<save>/addcont/` or in the
+extra DLC folder (`--dlc`, `DECEPTION_DLC_DIR`; shadPS4's `dlc/CUSA02859` works as it is).
+`sceAppContentGetAddcontInfo` reports them installed and `sceAppContentAddcontMount` serves each one's
+files (`dlc/*.dat`) as `/addcont<n>` (`src/runtime_content.c`).
+
+Trophies come from the dump's `sce_sys/trophy/trophy00.trp` (35); unlocks are kept in
 `<save>/trophies.dat` and shown as a notice.
 
 ## Release folder and setup
@@ -188,7 +154,8 @@ Trophies come from the dump's `sce_sys/trophy/trophy00.trp` (65, TROP000-064); u
 `deception-setup.exe` (`setup/`) runs `prepare/run.py prepare` into `game/` beside it, rewrites the
 game's instructions for this CPU if needed, writes `settings.ini` from the template when there is
 none, sets its `skip_intro` line from the window's checkbox, and writes `paths.ini` with the game and
-save folders and, when one is chosen, `dlc=`. The command line does the same as the window:
+save folders and, when chosen, `update=` and `dlc=`. Nothing is written outside the release folder
+and the save folder. The command line does the same as the window:
 `deception-setup.exe --help`.
 
 Started with no arguments, `deception.exe` reads `paths.ini` and builds the command line `run.py`

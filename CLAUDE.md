@@ -1,12 +1,13 @@
 # Deception PC runner
 
-Native Windows and Linux runner for the PS4 version of Deception (CUSA00038, v1.10, SDK 4.008; Housemarque's
-own engine, statically linked into eboot.bin, with Wwise audio in audio.pck and data in stream.dat).
+Native Windows and Linux runner for the PS4 version of Deception IV: The Nightmare Princess
+(CUSA02859, update v1.01; KOEI TECMO's engine statically linked into eboot.bin, KTSL2 sound over
+Ngs2, data in FILE_PS4 archives).
 The game's x86-64 code runs directly; PS4 system calls are reimplemented in C and GNM rendering goes
 through shadPS4's video core on Vulkan. See [docs/development.md](docs/development.md) for the
 pipeline and [docs/building.md](docs/building.md) for the toolchain and packaging. No game files
 are in the repository, and nothing assumes where the decrypted dump is: set `DECEPTION_GAME_DIR`
-to it (or pass `--game DIR` to `run.py`). Tests that need it skip without it.
+to it (or pass `--game DIR` to `run.py`), and `DECEPTION_UPDATE_DIR` to its update (`--update DIR`). Tests that need it skip without it.
 
 ## Loop
 - Build: `bash build.sh` (Git Bash on Windows, where it puts MSYS2 CLANG64 on PATH itself; or Linux).
@@ -35,10 +36,16 @@ to it (or pass `--game DIR` to `run.py`). Tests that need it skip without it.
   MSYS2, no Python of the player's own. Never package game files or anything built from a dump.
 - Python edits on Windows: write files with LF line endings (`write_bytes`, or
   `open(path, 'w', newline='')`): text mode would turn the tree's LF into CRLF.
-- The DLC dumps are 22 entitlement-only add-ons (ships and skins; each folder holds only sce_sys,
-  no data), so DLC means sceAppContent reporting them as installed, not serving files.
-- The engine takes its own command-line switches (strings in the eboot: `-nosplash`, `-no_video`,
-  `-no_level_intro`, ...); pass them with `python run.py --guest-arg <switch>`.
+- DLC: 19 add-ons (`DLC000...` folders, each with `dlc/*.dat` and sce_sys); sceAppContent reports
+  them installed and mounts each as /addcont<n> (src/runtime_content.c).
+- The game is held at its native 30 FPS: its logic steps once per flip, so a 60 FPS mode runs it at
+  double speed. It renders 1920x1080 only (no Pro mode); other aspect ratios are window shapes.
+- Shader caches live in `shaders/` (repo, or next to the release exe); write nothing under
+  %APPDATA%/%LOCALAPPDATA% or the XDG folders.
+- `DECEPTION_POKE=<offset>=<hex>,...` patches the image at start for experiments (offsets as in
+  `llvm-objdump -d out/game/eboot.elf`).
+- Scripted test runs: use a copy of the save folder (`run.py --user <copy>`): stray presses on the
+  title menu can start NEW GAME over the user's save.
 - `skip_intro=1` (settings.ini, default): src/runtime_intro.c runs the vblank fast and taps Cross
   through the logos and the autosave notice, then one Cross on "Press ANY button", keyed on the
   archive entries the game reads; a start lands on the title menu (NEW GAME / CONTINUE).
