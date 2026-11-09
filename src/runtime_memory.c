@@ -24,9 +24,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
-/* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB; a PS4 Pro (render_resolution=4k) gives
- * games 512 MiB more, and Deception sizes its render pools for it in Pro mode (5240 MiB at boot).
- * DECEPTION_DMEM_MB raises it. pool() falls back to the retail size when the host refuses the larger
+/* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB; a PS4 Pro gives games 512 MiB more
+ * (the runner reports a base PS4). DECEPTION_DMEM_MB raises it. pool() falls back to the retail size when the host refuses the larger
  * pool. */
 #define RETAIL_POOL (UINT64_C(5056) * 1024 * 1024)
 static uint64_t pool_bytes;

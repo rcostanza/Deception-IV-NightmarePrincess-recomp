@@ -44,9 +44,6 @@ int deception_display_settings_is_open(void);
 void deception_exit_prompt_open(void);
 /* Ends the game as closing its window does (any thread). */
 void deception_gpu_request_quit(void);
-/* 1 when settings.ini render_resolution (DECEPTION_RENDER_RESOLUTION) is 4k: the game runs in PS4
- * Pro mode with a 3840x2160 video out. Valid once deception_gpu_init returned. */
-int deception_render_4k(void);
 /* 1 when settings.ini hdr (DECEPTION_HDR) is on: the video out offers BT.2020 PQ when the display
  * has an HDR10 surface, and the game then outputs HDR. Valid once deception_gpu_init returned. */
 int deception_hdr(void);

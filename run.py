@@ -10,7 +10,7 @@ Options: --game DIR (the decrypted dump; default DECEPTION_GAME_DIR), --update D
 update, laid over the game as the PS4 does; default DECEPTION_UPDATE_DIR), --timeout SECONDS (play only),
 --out DIR (the game image, default out/game), --dlc DIR (one more folder of DLC next to the save's
 addcont, e.g. shadPS4's addcont; default DECEPTION_DLC_DIR). Other arguments go to deception. Saves land in
-user/, shader caches in the folder every copy of the game shares (shared_cache_dir), options in
+user/, shader caches in shaders/ (shared_cache_dir), options in
 user/settings.ini, or settings.ini here until that exists (see settings.example.ini).
 """
 import argparse
@@ -51,14 +51,12 @@ def isa_rewrite_wanted(missing, env):
 
 
 def shared_cache_dir(env=os.environ):
-    """Shader and pipeline caches (and the GPU library's logs): one folder per PC, shared by run.py
-    and set-up copies of the game (src/launcher.c), whatever their save folder.
+    """Shader and pipeline caches (and the GPU library's logs): shaders/ in this folder, as a
+    release keeps them next to its exe (src/launcher.c), never in the user's profile.
     DECEPTION_GPU_USER_DIR overrides it."""
     if env.get('DECEPTION_GPU_USER_DIR'):
         return Path(env['DECEPTION_GPU_USER_DIR'])
-    if WINDOWS:
-        return Path(env.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local') / 'Deception'
-    return Path(env.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'deception'
+    return PORT / 'shaders'
 
 
 def run_script(name, *args, check=True):

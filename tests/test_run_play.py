@@ -41,10 +41,9 @@ class RunPlayTests(unittest.TestCase):
                 self.assertIn(str(user.resolve()), popen.call_args.args[0])
             self.assertTrue(user.is_dir())
 
-    def test_shared_cache_dir_is_per_pc(self):
-        env = {'LOCALAPPDATA': r'C:\Users\a\AppData\Local', 'XDG_CACHE_HOME': '/home/a/.cache'}
-        expected = Path(env['LOCALAPPDATA']) / 'Deception' if run.WINDOWS else Path('/home/a/.cache/deception')
-        self.assertEqual(run.shared_cache_dir(env), expected)
+    def test_shared_cache_dir_is_in_the_project(self):
+        env = {'LOCALAPPDATA': 'C:/Users/a/AppData/Local', 'XDG_CACHE_HOME': '/home/a/.cache'}
+        self.assertEqual(run.shared_cache_dir(env), run.PORT / 'shaders')
         self.assertEqual(run.shared_cache_dir({**env, 'DECEPTION_GPU_USER_DIR': 'elsewhere'}), Path('elsewhere'))
 
 

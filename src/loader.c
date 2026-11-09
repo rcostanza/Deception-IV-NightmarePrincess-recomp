@@ -903,7 +903,6 @@ int main(int argc, char **argv) {
         if (deception_gpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,deception_gpu_symbol_count());
         start_hang_watch();
-        if (deception_render_4k()) runtime_kernel_set_neo_mode(1);
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);

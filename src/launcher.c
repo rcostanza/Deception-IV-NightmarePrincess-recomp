@@ -5,9 +5,8 @@
  *     game=<the dump: eboot.bin, sce_module, sce_sys, FILE_PS4>
  *     update=<optional: its decrypted update (patch), laid over the game as the PS4 does>
  *     save=<saves and the launch log: what run.py calls --user>
- *     cache=<optional: shader caches; by default the folder every copy shares, as run.py's>
+ *     cache=<optional: shader caches; by default shaders/ next to this exe>
  *     dlc=<optional: one more folder of DLC, read next to save's addcont, e.g. shadPS4's addcont>
- * Without paths.ini here, the per-user copy the setup also writes is read (user_paths_ini).
  * Narrow strings are UTF-8 (Windows: the manifest's activeCodePage). */
 #include "launcher.h"
 
@@ -76,33 +75,8 @@ static void set_path(char *out, const char *value) {
     else snprintf(out, PATH_CHARS, "%s" SEP "%s", exe_dir, value);
 }
 
-/* run.py's shared_cache_dir: one folder per PC for every copy of the game. */
-static void shared_cache(char *out) {
-#ifdef _WIN32
-    const char *local = getenv("LOCALAPPDATA");
-    if (local && local[0]) snprintf(out, PATH_CHARS, "%s\\Deception", local);
-#else
-    const char *xdg = getenv("XDG_CACHE_HOME"), *home = getenv("HOME");
-    if (xdg && xdg[0]) snprintf(out, PATH_CHARS, "%s/deception", xdg);
-    else if (home && home[0]) snprintf(out, PATH_CHARS, "%s/.cache/deception", home);
-#endif
-    else snprintf(out, PATH_CHARS, "%s" SEP "cache", exe_dir);
-}
-
-/* The per-user copy of paths.ini the setup also writes, so a release unpacked into a new folder
- * finds the folders the last setup chose: %APPDATA%\Deception\paths.ini, or
- * $XDG_CONFIG_HOME/deception/paths.ini (~/.config when unset). "" when neither is known. */
-static void user_paths_ini(char *out) {
-    out[0] = 0;
-#ifdef _WIN32
-    const char *appdata = getenv("APPDATA");
-    if (appdata && appdata[0]) snprintf(out, PATH_CHARS, "%s\\Deception\\paths.ini", appdata);
-#else
-    const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
-    if (xdg && xdg[0]) snprintf(out, PATH_CHARS, "%s/deception/paths.ini", xdg);
-    else if (home && home[0]) snprintf(out, PATH_CHARS, "%s/.config/deception/paths.ini", home);
-#endif
-}
+/* Shader caches: shaders/ next to the exe, so nothing lands in the user's profile folders. */
+static void default_cache(char *out) { snprintf(out, PATH_CHARS, "%s" SEP "shaders", exe_dir); }
 
 /* game=, update=, save=, cache= and dlc= of paths.ini; 1 when game and save are there. */
 static int read_paths(const char *ini) {
@@ -127,7 +101,7 @@ static int read_paths(const char *ini) {
         else if (!strcasecmp(key, "update")) set_path(update, value);
     }
     fclose(f);
-    if (!cache[0]) shared_cache(cache);
+    if (!cache[0]) default_cache(cache);
     return game[0] && save[0];
 }
 
@@ -361,11 +335,8 @@ int launch_from_paths_ini(int *argc, char ***argv) {
     char ini[PATH_CHARS], message[3 * PATH_CHARS];
     snprintf(ini, sizeof ini, "%s" SEP "paths.ini", exe_dir);
     if (!read_paths(ini)) {
-        user_paths_ini(ini);
-        if (!ini[0] || !read_paths(ini)) {
-            complain("The game is not set up yet.\n\n" RUN_SETUP);
-            return 1;
-        }
+        complain("The game is not set up yet.\n\n" RUN_SETUP);
+        return 1;
     }
     /* DECEPTION_SAVE_DIR overrides save= (a relative one is relative to the exe's folder). */
     const char *save_override = getenv("DECEPTION_SAVE_DIR");

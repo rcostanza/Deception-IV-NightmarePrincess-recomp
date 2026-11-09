@@ -70,9 +70,6 @@ std::vector<std::wstring> missing_update_files(const std::filesystem::path& upda
 std::filesystem::path update_beside(const std::filesystem::path& game);
 // What `root`/paths.ini names, if it names both folders.
 std::optional<Paths> read_paths(const std::filesystem::path& root);
-// The per-user copy of paths.ini that install() also writes: %APPDATA%\Deception\paths.ini, or $XDG_CONFIG_HOME/deception/paths.ini (~/.config when unset); src/launcher.c
-// reads it when the release folder has none. Empty when %APPDATA% is unset.
-std::filesystem::path user_paths_ini();
 // read_paths(root), else the per-user copy: the folders to start from in a release just unpacked.
 std::optional<Paths> remembered_paths(const std::filesystem::path& root);
 // save/ in the release folder: a release is never zipped with one, so unpacking a newer release over

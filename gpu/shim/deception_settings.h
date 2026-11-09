@@ -30,10 +30,6 @@ inline int ParseAudioChannels(std::string_view value) {
     if (value == "8") return Audio71;
     return AudioChannelsAuto;
 }
-/// Size the game renders at (key render_resolution): the PS4's 1080p, or the PS4 Pro's 2160p
-/// (PS4 Pro mode and a 3840x2160 video out, loader.c mount_boot_config_4k).
-enum RenderResolution : int { Render1080p = 0, Render4k, RenderResolutionCount };
-inline constexpr std::string_view RenderResolutionKeys[RenderResolutionCount] = {"1080p", "4k"};
 
 
 /// "21:9" and the like for a size (within 3%: 2560x1080 and 3440x1440 are 21:9), else "2.10:1".
@@ -140,10 +136,6 @@ struct Values {
     std::atomic<int> frame_rate{60};
     /// Speaker layout of the game's audio (AudioChannels), read when the game opens its ports.
     std::atomic<int> audio_channels{AudioChannelsAuto};
-    /// RenderResolution, 4k by default; read once, before the game starts.
-    int startup_render_resolution = Render4k;
-    /// What the Display Settings pages save for the next start.
-    std::atomic<int> render_resolution{Render4k};
     /// FSR 1 RCAS sharpening of the picture as the window shows it (key sharpening,
     /// DECEPTION_SHARPENING; on by default): the presenter reads it at each frame.
     std::atomic<bool> sharpening{true};
@@ -163,7 +155,7 @@ Values& Get();
 void Load();
 
 /// Writes the display keys (display_mode, monitor, aspect_ratio, window, vsync, tearing, frame_rate,
-/// render_resolution, sharpening, hdr) into Path() in place: their lines are replaced, missing ones
+/// sharpening, hdr) into Path() in place: their lines are replaced, missing ones
 /// appended, the rest kept (from the default file until Path() exists).
 void SaveDisplay();
 

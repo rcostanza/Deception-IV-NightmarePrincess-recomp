@@ -10,8 +10,6 @@
 
 double DeceptionWindowRefreshRate(); // deception_gpu.cpp: exact rate of the window's display, 0 when unknown
 bool DeceptionWaitForVblank(); // deception_gpu.cpp: waits for the window's display to start a refresh; false when it cannot (not Windows)
-extern "C" int deception_render_4k(void); // deception_settings.cpp: render_resolution=4k
-inline bool DeceptionRender4k() { return deception_render_4k() != 0; }
 extern "C" int deception_hdr(void); // deception_settings.cpp: settings.ini hdr
 extern "C" int deception_frame_rate(void); // deception_settings.cpp: frame_rate (30, 60, 90, 120, 144, 180)
 extern "C" int deception_vblank_boost(void); // deception_settings.cpp: skip_intro's fast logos (0: off)
@@ -30,10 +28,9 @@ public:
         return v ? std::strtol(v, nullptr, 10) : fallback;
     }
     s32 GetGpuId() { static const auto value = s32(Number("DECEPTION_GPU_ID", -1)); return value; }
-    // deception: the video out size, 3840x2160 with render_resolution=4k (deception_render_4k), half
-    // with 1080p.
-    u32 GetInternalScreenWidth() { static const auto value = u32(Number("DECEPTION_INTERNAL_WIDTH", DeceptionRender4k() ? 3840 : 1920)); return value; }
-    u32 GetInternalScreenHeight() { static const auto value = u32(Number("DECEPTION_INTERNAL_HEIGHT", DeceptionRender4k() ? 2160 : 1080)); return value; }
+    // deception: the video out size: the game's 1920x1080 (it has no PS4 Pro mode).
+    u32 GetInternalScreenWidth() { static const auto value = u32(Number("DECEPTION_INTERNAL_WIDTH", 1920)); return value; }
+    u32 GetInternalScreenHeight() { static const auto value = u32(Number("DECEPTION_INTERNAL_HEIGHT", 1080)); return value; }
     // deception: Relaxed by default: without readbacks, guest code that reads GPU-written
     // vertices sees stale data; Relaxed costs no measurable frame rate.
     u32 GetReadbacksMode() { static const auto value = u32(Number("DECEPTION_READBACKS", GpuReadbacksMode::Relaxed)); return value; }

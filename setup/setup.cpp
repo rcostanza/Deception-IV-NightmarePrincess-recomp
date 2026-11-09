@@ -284,9 +284,9 @@ std::wstring strip(const std::wstring& s) {
 void write_paths(const fs::path& ini, const fs::path& game, const fs::path& update, const fs::path& save,
                  const fs::path& dlc) {
 #ifdef _WIN32
-    const std::string setup = "deception-setup.exe", cache = "%LOCALAPPDATA%\\Deception";
+    const std::string setup = "deception-setup.exe";
 #else
-    const std::string setup = "deception-setup", cache = "~/.cache/deception";
+    const std::string setup = "deception-setup";
 #endif
     const std::string nl = kNewline;
     write_text(ini, "; Written by " + setup + ". Run it again to change these folders." + nl +
@@ -294,8 +294,7 @@ void write_paths(const fs::path& ini, const fs::path& game, const fs::path& upda
                     "; update: optional, the dump of its update (patch), laid over the game. Only ever read." + nl +
                     "; save: your saves, and deception.log in its log folder." + nl +
                     "; dlc: optional, one more folder of DLC (e.g. shadPS4's addcont), next to save's addcont." + nl +
-                    "; Shader caches are shared by every copy of the game: " + cache + nl +
-                    "; (cache=<folder> moves them)." + nl +
+                    "; Shader caches: the shaders folder next to the game's exe (cache=<folder> moves them)." + nl +
                     "[paths]" + nl +
                     "game=" + narrow(text(game)) + nl +
                     (update.empty() ? std::string() : "update=" + narrow(text(update)) + nl) +
@@ -511,16 +510,6 @@ fs::path update_beside(const fs::path& game) {
     return fs::is_regular_file(update / L"eboot.bin", ec) ? update : fs::path();
 }
 
-fs::path user_paths_ini() {
-#ifdef _WIN32
-    const wchar_t* appdata = _wgetenv(L"APPDATA");
-    return appdata && appdata[0] ? fs::path(appdata) / L"Deception" / L"paths.ini" : fs::path();
-#else
-    const char* config = std::getenv("XDG_CONFIG_HOME");
-    return (config && config[0] ? fs::path(config) : home() / ".config") / "deception" / "paths.ini";
-#endif
-}
-
 namespace {
 
 // game=, update=, save= and dlc= of `ini`; relative values are relative to `root`.
@@ -564,13 +553,7 @@ std::optional<Paths> read_paths(const fs::path& root) {
 }
 
 std::optional<Paths> remembered_paths(const fs::path& root) {
-    if (auto paths = read_paths(root))
-        return paths;
-    try {
-        return read_paths_file(user_paths_ini(), root);
-    } catch (const Error&) {
-        return std::nullopt;
-    }
+    return read_paths(root);
 }
 
 fs::path default_save() {
@@ -714,16 +697,6 @@ fs::path install(const Options& opt, const Log& log) {
     log(L"wrote    paths.ini (game " + text(game) + (update.empty() ? L"" : L", update " + text(update)) +
         L", save " + text(save) +
         (dlc.empty() ? L"" : L", dlc " + text(dlc)) + L")");
-    // The per-user copy, for the next release unpacked elsewhere; the game runs without it.
-    if (fs::path user = user_paths_ini(); !user.empty()) {
-        try {
-            fs::create_directories(user.parent_path(), ec);
-            write_paths(user, clean(game), update, clean(save), dlc);
-            log(L"wrote    " + text(user));
-        } catch (const Error& e) {
-            log(L"skipped  " + text(user) + L" (" + e.message + L")");
-        }
-    }
     return exe;
 }
 

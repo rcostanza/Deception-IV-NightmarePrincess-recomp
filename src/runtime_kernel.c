@@ -224,8 +224,8 @@ static ABI void pthread_cxa_finalize(void *dso) { (void)dso; }
 GuestCallback runtime_guest_thread_dtors;
 /* The same libc also registers its thread atexit counter and report hooks; recorded the same way. */
 GuestCallback runtime_guest_thread_atexit_count, runtime_guest_thread_atexit_report;
-/* sceKernelIsNeoMode / sceKernelHasNeoMode: 1 on a PS4 Pro, which render_resolution=4k reports
- * (loader.c), as the GPU core does (gpu/shim/deception_gpu.cpp). */
+/* sceKernelIsNeoMode / sceKernelHasNeoMode: 1 on a PS4 Pro. Deception has no Pro mode, so the
+ * runner reports a base PS4 (as gpu/shim/deception_gpu.cpp); runtime_kernel_set_neo_mode is for tests. */
 static int neo;
 void runtime_kernel_set_neo_mode(int enabled) { neo=enabled!=0; }
 int runtime_kernel_neo_mode(void) { return neo; }

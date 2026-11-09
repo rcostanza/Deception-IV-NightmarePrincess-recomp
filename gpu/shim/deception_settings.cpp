@@ -78,12 +78,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "audio_channels") {
         v.audio_channels = ParseAudioChannels(value);
     } else if (key == "render_resolution") {
-        std::string lower;
-        for (const char c : value) lower += char(std::tolower(static_cast<unsigned char>(c)));
-        v.startup_render_resolution = v.render_resolution = lower == "1080p" ? Render1080p : Render4k;
-        if (!lower.empty() && lower != "1080p" && lower != "4k" && lower != "2160p") {
-            std::printf("Settings: render_resolution=%s is not 1080p or 4k; using 4k\n", value.c_str());
-        }
+        // An older settings.ini's key: the game renders 1080p only (its engine sizes every target
+        // at 1920x1080), so the line is dropped on the next save.
     } else {
         std::printf("Settings: unknown key %s\n", key.c_str());
     }
@@ -100,7 +96,6 @@ std::vector<std::pair<std::string, std::string>> DisplayKeys() {
         {"vsync", v.vsync ? "1" : "0"},
         {"tearing", v.tearing ? "1" : "0"},
         {"frame_rate", std::to_string(v.frame_rate.load())},
-        {"render_resolution", std::string(RenderResolutionKeys[std::clamp(v.render_resolution.load(), 0, RenderResolutionCount - 1)])},
         {"sharpening", v.sharpening ? "1" : "0"},
         {"hdr", v.hdr ? "1" : "0"},
     };
@@ -214,7 +209,6 @@ void Load() {
         {"DECEPTION_ASPECT_RATIO", "aspect_ratio"},
         {"DECEPTION_AUDIO_CHANNELS", "audio_channels"},
         {"DECEPTION_SKIP_INTRO", "skip_intro"},     {"DECEPTION_FRAME_RATE", "frame_rate"},
-        {"DECEPTION_RENDER_RESOLUTION", "render_resolution"},
         {"DECEPTION_HDR", "hdr"},
         {"DECEPTION_SHARPENING", "sharpening"},
     };
@@ -286,7 +280,3 @@ extern "C" int deception_hdr(void) {
     return DeceptionSettings::Get().startup_hdr ? 1 : 0;
 }
 
-
-extern "C" int deception_render_4k(void) {
-    return DeceptionSettings::Get().startup_render_resolution == DeceptionSettings::Render4k;
-}

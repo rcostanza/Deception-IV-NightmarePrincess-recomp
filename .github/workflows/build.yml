@@ -1,6 +1,6 @@
 # Builds Deception's runner from source on Windows (MSYS2 CLANG64, as docs/building.md) and Linux,
 # runs the tests and packages each release (stripped, what players get), its symbols and the debug
-# release as the run's artifacts. linux-smoke unpacks the Linux release on other distros. A v* tag
+# release as the run's artifacts. linux-smoke unpacks the Linux release on other distros. A vN.N tag
 # publishes the two player packages as a GitHub release once every job has passed, with the tag's
 # section of CHANGELOG.md as its text (tools/release_notes.py).
 name: build
@@ -8,7 +8,8 @@ name: build
 on:
   # Releases only: pushes to branches do not build.
   push:
-    tags: ['v*']
+    # vN.N only (v0.1, v1.2): other tags do not build.
+    tags: ['v[0-9]+.[0-9]+']
   pull_request:
   workflow_dispatch:
 
@@ -22,7 +23,7 @@ env:
   PYTHON_EMBED_SHA256: 352e232f25b5120508f11a6dfc1bd9076d3e70c30977d552a63338838c2ae8fb
 
 jobs:
-  # v* tags: the tag's section of CHANGELOG.md, checked at once rather than after the builds.
+  # vN.N tags: the tag's section of CHANGELOG.md, checked at once rather than after the builds.
   notes:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
@@ -229,7 +230,7 @@ jobs:
           docker run --rm -v "$PWD:/w" "${{ matrix.image }}" \
             bash /w/.github/scripts/smoke-test.sh "/w/unpacked/${{ needs.linux.outputs.release }}"
 
-  # v* tags: the release, with what players download and nothing else (no symbols or debug builds).
+  # vN.N tags: the release, with what players download and nothing else (no symbols or debug builds).
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [notes, windows, linux, linux-smoke]

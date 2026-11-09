@@ -119,7 +119,7 @@ constexpr auto kResolutionSettle = std::chrono::seconds(1);
 // guarded by imgui_mutex.
 std::atomic<bool> exit_open{false};
 int exit_focus = 0;
-enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowRender, RowSharpen, RowHdr, RowCount };
+enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowSharpen, RowHdr, RowCount };
 
 // The colours of the game's own menus (Main Menu, Options): teal bars on a dark, see-through
 // backdrop inside a thin cyan frame.
@@ -376,10 +376,6 @@ void ChangeDisplayRow(int row, int delta) {
         s.tearing = next == 2;
         break;
     }
-    case RowRender:
-        s.render_resolution = s.render_resolution == DeceptionSettings::Render4k ? DeceptionSettings::Render1080p
-                                                                                   : DeceptionSettings::Render4k;
-        break;
     case RowSharpen: s.sharpening = !s.sharpening; break;
     case RowHdr: s.hdr = !s.hdr; break;
     default: return;
@@ -445,14 +441,6 @@ DisplayRowText DisplayRowAt(int row) {
                 "On waits for the monitor: no tearing, slightly more input delay. Off shows the newest frame "
                 "at each refresh, still without tearing. Off, tearing allowed shows each frame at once: the "
                 "least delay."};
-    case RowRender: {
-        const int value = s.render_resolution;
-        std::string text = value == DeceptionSettings::Render4k ? "4K (3840 x 2160)" : "1080p";
-        if (value != s.startup_render_resolution) text += "  (after restart)";
-        return {"Render resolution", text,
-                "4K as on PS4 Pro, filtered down to the window: sharper. 1080p as on PS4: lighter on the GPU. "
-                "Applies after a restart."};
-    }
     case RowSharpen:
         return {"Sharpening", s.sharpening ? "On" : "Off",
                 "AMD FSR 1 RCAS sharpening of the picture at the window's size: crisper edges and detail, "

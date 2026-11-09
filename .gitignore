@@ -10,3 +10,4 @@ user/
 /*.spv
 dist/
 dist-*/
+/shaders/
