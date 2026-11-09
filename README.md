@@ -13,7 +13,6 @@ This requires you to provide a decrypted dump of your own copy of the game. Only
 ## Features
 
 - **Any window size:** windowed, borderless or fullscreen, at 720p, 900p, 1080p, 1440p, 4K and more. The game renders at its native 1080p and is scaled to the window, with AMD FSR 1 RCAS sharpening.
-- **Aspect ratios (16:9, 4:3, 21:9 and 32:9)** for the window's shape. The game itself stays 16:9, with black bars on other shapes.
 - **Native 30 FPS** at the right game speed (see [Frame rate](#frame-rate)).
 - **Update and DLC support** from your own dumps.
 - **Built in skip intro:** (optionally) boots straight to the title menu (NEW GAME / CONTINUE) in about 6 s: the logos, the autosave notice and "Press ANY button" are skipped.
@@ -32,11 +31,11 @@ shadPS4 is a general PS4 emulator, and this project builds on its video core. It
 - **Intro skip.** A start lands on the title menu in about 6 s, past the logos, the autosave notice and "Press ANY button".
 - **One-step setup.** Point the setup at your dump (and optionally its update and DLC): it prepares the game, adds a shortcut or menu entry, and that's it. No emulator settings or game list to manage.
 - **Portable.** Saves, settings, logs and shader caches stay in the game's folders; nothing goes to `%APPDATA%`.
-- **In-game display settings** (F10, or hold Select): window mode, aspect ratio, window size, monitor, VSync and sharpening, changed while you play.
+- **In-game display settings** (F10, or hold Select): window mode, window size, monitor, VSync and sharpening, changed while you play, on a page styled like the game's own menus.
 - **Only options that work for this game.** No frame rate unlock that would speed the game up, no 4K or HDR switches it cannot use.
 - **Help when it breaks.** A crash keeps its log and says where it is; a freeze writes what every thread was doing.
 
-What it does not change: the game still runs at its native 30 FPS and renders at 1080p, as it does on PS4 and on shadPS4.
+What it does not change: the game still runs at its native 30 FPS and renders at 1080p in 16:9, as it does on PS4 and on shadPS4.
 
 ## Requirements
 
@@ -94,9 +93,9 @@ A DLC dump is a folder per add-on, named after its label (the end of its content
 
 `settings.ini` in your save folder holds every setting, each with a comment. The **Display Settings** panel (**F10**, or hold **Select** for two seconds) changes most of them while the game runs and saves them when it closes:
 
-- aspect ratio (4:3, 16:9, 21:9 or 32:9, at the next start), window mode, windowed resolution (the sizes of
-  that ratio; applied a second after you stop changing it) and monitor. The fullscreen modes pick their
-  size from the screen and the aspect ratio, with black bars when the screen is of another shape;
+- window mode, windowed resolution (16:9 sizes, like the game; applied a second after you stop changing
+  it) and monitor. The fullscreen modes pick their size from the screen, with black bars when the
+  screen is not 16:9;
 - VSync, and tearing with VSync off (the least input delay);
 - sharpening (AMD FSR 1 RCAS, on by default), applied at once; **F9** also switches it over the game, to compare.
 
@@ -156,4 +155,4 @@ I (human) am a programmer, but I know nothing about C++ which is required to mak
 
 Based on and inspired by [theatrhythm-fbl-pc](https://github.com/YAPhoa/theatrhythm-fbl-pc).
 
-GPL-2.0-or-later, see [LICENSE](LICENSE). Runtime follows [shadPS4](https://github.com/shadps4-emu/shadPS4). Deception IV: The Nightmare Princess is a game by KOEI TECMO GAMES; this project is not affiliated with or endorsed by them.
+GPL-2.0-or-later, see [LICENSE](LICENSE). The overlay uses the fonts DejaVu Sans (Bitstream Vera license), Cinzel and Josefin Slab (SIL Open Font License 1.1); their licenses are in `gpu/third_party/fonts`. Runtime follows [shadPS4](https://github.com/shadps4-emu/shadPS4). Deception IV: The Nightmare Princess is a game by KOEI TECMO GAMES; this project is not affiliated with or endorsed by them.

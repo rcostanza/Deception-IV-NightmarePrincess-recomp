@@ -39,7 +39,7 @@ to it (or pass `--game DIR` to `run.py`), and `DECEPTION_UPDATE_DIR` to its upda
 - DLC: 19 add-ons (`DLC000...` folders, each with `dlc/*.dat` and sce_sys); sceAppContent reports
   them installed and mounts each as /addcont<n> (src/runtime_content.c).
 - The game is held at its native 30 FPS: its logic steps once per flip, so a 60 FPS mode runs it at
-  double speed. It renders 1920x1080 only (no Pro mode); other aspect ratios are window shapes.
+  double speed. It renders 1920x1080 only (no Pro mode) and 16:9 only: the window takes 16:9 sizes.
 - Shader caches live in `shaders/` (repo, or next to the release exe); write nothing under
   %APPDATA%/%LOCALAPPDATA% or the XDG folders.
 - `DECEPTION_POKE=<offset>=<hex>,...` patches the image at start for experiments (offsets as in

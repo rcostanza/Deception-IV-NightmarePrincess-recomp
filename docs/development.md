@@ -31,7 +31,7 @@ The game image is built from the dump by `run.py` (and by the setup in a release
 Every import Deception's modules make is implemented, and only those: a runtime function the
 game does not import is not kept. `python run.py check` lists any that are missing (none today).
 
-How the picture and the sound are made is below ([Render resolution and aspect ratios](#render-resolution-and-aspect-ratios), [Audio](#audio)).
+How the picture and the sound are made is below ([Render resolution and aspect ratio](#render-resolution-and-aspect-ratio), [Audio](#audio)).
 
 ## Running from the source tree
 
@@ -85,7 +85,7 @@ and the branch that keeps 2 is skipped), but the logic does not scale its step w
 walk covers twice the distance and the menus repeat keys twice as fast. So no frame rate setting is
 offered; the vblank stays at 60 Hz (`GetVblankFrequency`), apart from the skip-intro boost below.
 
-## Render resolution and aspect ratios
+## Render resolution and aspect ratio
 
 The game renders at 1920x1080 and has no PS4 Pro mode: it reads only the refresh rate from
 `sceVideoOutGetResolutionStatus` and gives its display buffers and render targets fixed sizes
@@ -95,16 +95,19 @@ window, and with `sharpening=1` (the default) FSR 1 RCAS (`rcas.frag`, `host_pas
 sharpens it at the window's size. A native 4K mode would need every render target and the UI's
 1920-pixel layout scaled; that has not been done.
 
-`aspect_ratio` picks the window's shape: in windowed mode the window has it (its size list holds only
-sizes of that ratio), and the fullscreen modes fit it into the screen
-(`DeceptionSettings::PickFullscreen`). The game's 16:9 picture sits inside with black bars. For
-future work: the 3D projection takes its aspect from one of ten 16:9 float constants in the image
+The picture is 16:9 only: the window's size list holds only 16:9 sizes, and the fullscreen modes
+fit 16:9 into the screen (`DeceptionSettings::PickFullscreen`) with black bars on other shapes. An
+`aspect_ratio` line from an older settings.ini is ignored. For future work: the 3D projection takes its aspect from one of ten 16:9 float constants in the image
 (0x73b1b0, 0x73b1c4, 0x73b1c8, 0x876ab4, 0x891174, 0x893780, 0x8937b4, 0x894530, 0x895f60, 0x895f8c);
 patched to 21:9 the scene shows more to the sides (squeezed into the 16:9 buffer) while the HUD
 keeps its layout, so a real ultrawide mode would also need wider render targets.
 
 The only overlay is the PS4's system UI (save list, text entry, trophy notices), the Display
-Settings panel and the exit prompt (`gpu/shim/deception_overlay.cpp`).
+Settings panel and the exit prompt (`gpu/shim/deception_overlay.cpp`). The last two are drawn like the
+game's dialogs: a gold-framed black panel, the chosen row on an amber band between gold ornaments,
+headings in Cinzel Bold and text in Josefin Slab SemiBold (free stand-ins for the game's Roman
+capitals and slab serif; `gpu/third_party/fonts`). Scripted runs open them with the pad-file tokens
+`display_settings` and `exit_prompt`.
 
 ## Audio
 

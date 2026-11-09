@@ -134,15 +134,17 @@ add_library(deception_gpu STATIC ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SO
     shadps4/core/libraries/videodec/video_utils.cpp)
 add_dependencies(deception_gpu host_shaders)
 # The PS4 system UI overlay (save list, text entry, trophy notices): Dear ImGui
-# (third_party/imgui, MIT) with its Vulkan backend and an embedded font (third_party/fonts).
+# (third_party/imgui, MIT) with its Vulkan backend and embedded fonts (third_party/fonts).
 target_sources(deception_gpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
     third_party/imgui/backends/imgui_impl_vulkan.cpp)
 target_include_directories(deception_gpu PRIVATE third_party/imgui third_party/imgui/backends)
 target_compile_definitions(deception_gpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
-    DECEPTION_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-set_source_files_properties(shim/deception_overlay.cpp PROPERTIES
-    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+    DECEPTION_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf"
+    DECEPTION_TITLE_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/Cinzel-Bold.ttf"
+    DECEPTION_TEXT_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/JosefinSlab-SemiBold.ttf")
+set_source_files_properties(shim/deception_overlay.cpp PROPERTIES OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf;${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/Cinzel-Bold.ttf;${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/JosefinSlab-SemiBold.ttf")
 target_include_directories(deception_gpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/half/include)
 target_compile_definitions(deception_gpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(deception_gpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)

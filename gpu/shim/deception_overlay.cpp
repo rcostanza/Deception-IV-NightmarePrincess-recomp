@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
@@ -27,30 +28,25 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
-// DejaVu Sans, embedded (third_party/fonts, Bitstream Vera license).
+// The overlay's fonts, embedded from third_party/fonts: DejaVu Sans (Bitstream Vera license) for
+// the PS4's system UI, and for the pages drawn like the game's menus Cinzel Bold (headings, like the
+// game's Roman capitals) and Josefin Slab SemiBold (rows and sentences, like its light slab serif),
+// both SIL Open Font License.
 #ifdef _WIN32
-asm(".section .rdata,\"dr\"\n"
-    ".balign 16\n"
-    ".global deception_font_ttf\n"
-    "deception_font_ttf:\n"
-    ".incbin \"" DECEPTION_FONT_PATH "\"\n"
-    ".global deception_font_ttf_end\n"
-    "deception_font_ttf_end:\n"
-    ".text\n");
+#define DECEPTION_EMBED(name, path)                                                                    \
+    asm(".section .rdata,\"dr\"\n.balign 16\n.global " #name "\n" #name ":\n.incbin \"" path "\"\n"     \
+        ".global " #name "_end\n" #name "_end:\n.text\n");
 #else
-asm(".section .rodata\n"
-    ".balign 16\n"
-    ".hidden deception_font_ttf\n"
-    ".global deception_font_ttf\n"
-    "deception_font_ttf:\n"
-    ".incbin \"" DECEPTION_FONT_PATH "\"\n"
-    ".hidden deception_font_ttf_end\n"
-    ".global deception_font_ttf_end\n"
-    "deception_font_ttf_end:\n"
-    ".previous\n");
+#define DECEPTION_EMBED(name, path)                                                                    \
+    asm(".section .rodata\n.balign 16\n.hidden " #name "\n.global " #name "\n" #name ":\n.incbin \"" path \
+        "\"\n.hidden " #name "_end\n.global " #name "_end\n" #name "_end:\n.previous\n");
 #endif
-extern "C" const unsigned char deception_font_ttf[];
-extern "C" const unsigned char deception_font_ttf_end[];
+DECEPTION_EMBED(deception_font_ttf, DECEPTION_FONT_PATH)
+DECEPTION_EMBED(deception_title_font_ttf, DECEPTION_TITLE_FONT_PATH)
+DECEPTION_EMBED(deception_text_font_ttf, DECEPTION_TEXT_FONT_PATH)
+extern "C" const unsigned char deception_font_ttf[], deception_font_ttf_end[];
+extern "C" const unsigned char deception_title_font_ttf[], deception_title_font_ttf_end[];
+extern "C" const unsigned char deception_text_font_ttf[], deception_text_font_ttf_end[];
 
 namespace DeceptionOverlay {
 
@@ -109,9 +105,8 @@ std::atomic<bool> display_open{false};
 
 int display_row = 0;
 bool display_dirty = false;
-// An aspect ratio and window size being chosen on the panel: the window takes them once the rows
-// have rested for a second (or the panel closes), not at each step. -1 and {0, 0} when none.
-int pending_aspect = -1;
+// A window size being chosen on the panel: the window takes it once the row has rested for a
+// second (or the panel closes), not at each step. {0, 0} when none.
 std::pair<int, int> pending_resolution{0, 0};
 std::chrono::steady_clock::time_point pending_since{};
 constexpr auto kResolutionSettle = std::chrono::seconds(1);
@@ -119,21 +114,24 @@ constexpr auto kResolutionSettle = std::chrono::seconds(1);
 // guarded by imgui_mutex.
 std::atomic<bool> exit_open{false};
 int exit_focus = 0;
-enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowSharpen, RowCount };
+enum DisplayRow : int { RowMode, RowResolution, RowMonitor, RowVsync, RowSharpen, RowCount };
+// The pages' fonts (InitImGui): headings, and rows and sentences.
+ImFont* title_font = nullptr;
+ImFont* text_font = nullptr;
 
-// The colours of the game's own menus (Main Menu, Options): teal bars on a dark, see-through
-// backdrop inside a thin cyan frame.
+// The colours of the game's dialogs ("Start battle with current settings?"): a near-black panel in
+// a gold frame, cream text, the chosen answer on an amber band between two gold ornaments. The
+// overlay draws to an sRGB image, so these are linear values (in sRGB: frame #f0c070, #c08a3c,
+// #6e4a1e; band #9a5a1c to #2c1608; text #f5ecd8, #bcaa8a; title #f2d49c).
 namespace PageInk {
 constexpr ImU32 Rgb(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
-constexpr ImU32 Shade = Rgb(0x02, 0x08, 0x0e, 0xdc), Panel = Rgb(0x04, 0x16, 0x1e, 0xd8);
-constexpr ImU32 Frame = Rgb(0x8c, 0xec, 0xf4, 0xe6), FrameDim = Rgb(0x3a, 0x9c, 0xb0, 0xa0);
-constexpr ImU32 Row = Rgb(0x0c, 0x4c, 0x5c, 0xe0), RowLow = Rgb(0x06, 0x2c, 0x38, 0xe0);
-// The overlay draws to an sRGB image: these are linear, Focus shows as #2ac0d6 to #0a6e86.
-constexpr ImU32 Focus = Rgb(0x06, 0x86, 0xab), FocusLow = Rgb(0x01, 0x28, 0x3c);
-constexpr ImU32 Text = Rgb(0xff, 0xff, 0xff), TextDim = Rgb(0xc4, 0xe8, 0xee), Shadow = Rgb(0x00, 0x18, 0x22, 0xc0);
-constexpr ImU32 Help = Rgb(0xb0, 0xe4, 0xec);
+constexpr ImU32 Shade = Rgb(0x00, 0x00, 0x00, 0xcc), Panel = Rgb(0x01, 0x00, 0x00, 0xee);
+constexpr ImU32 GoldHi = Rgb(0xde, 0x86, 0x29), Gold = Rgb(0x86, 0x41, 0x0c), GoldDim = Rgb(0x28, 0x11, 0x03);
+constexpr ImU32 Hair = Rgb(0x28, 0x11, 0x03, 0xd0), BarMid = Rgb(0x52, 0x1a, 0x03, 0xf0), BarEdge = Rgb(0x06, 0x02, 0x01, 0xe0);
+constexpr ImU32 Text = Rgb(0xe9, 0xd6, 0xaf), TextDim = Rgb(0x80, 0x67, 0x41), Title = Rgb(0xe2, 0xa8, 0x55);
+constexpr ImU32 Help = Rgb(0xce, 0xb3, 0x82), Shadow = Rgb(0x00, 0x00, 0x00, 0xd0), IconFill = Rgb(0x03, 0x02, 0x01, 0xf0);
 // A setting that does not apply in the current mode: greyed out and passed over by Up/Down.
-constexpr ImU32 RowOff = Rgb(0x0a, 0x26, 0x2e, 0xb0), RowOffLow = Rgb(0x05, 0x16, 0x1c, 0xb0), TextOff = Rgb(0x5c, 0x7c, 0x84);
+constexpr ImU32 TextOff = Rgb(0x1d, 0x16, 0x0e);
 } // namespace PageInk
 
 s64 NowMs() {
@@ -303,34 +301,24 @@ std::pair<int, int> ShownResolution() {
                                     : std::pair<int, int>{s.window_width.load(), s.window_height.load()};
 }
 
-// imgui_mutex held: the aspect ratio the panel shows, the one being chosen or the setting.
-int ShownAspect() {
-    return pending_aspect >= 0 ? pending_aspect : DeceptionSettings::Get().aspect_ratio.load();
-}
-
-// imgui_mutex held: hands the chosen aspect ratio and window size to the window (which follows
-// aspect_ratio, window_width and window_height) once they have rested for kResolutionSettle, or at
-// once with `now`.
+// imgui_mutex held: hands the chosen window size to the window (which follows window_width and
+// window_height) once it has rested for kResolutionSettle, or at once with `now`.
 void SettleResolution(bool now) {
-    if ((pending_aspect < 0 && !pending_resolution.first) ||
+    if (!pending_resolution.first ||
         (!now && std::chrono::steady_clock::now() - pending_since < kResolutionSettle)) {
         return;
     }
     auto& s = DeceptionSettings::Get();
-    if (pending_resolution.first) {
-        s.window_width = pending_resolution.first;
-        s.window_height = pending_resolution.second;
-    }
-    if (pending_aspect >= 0) s.aspect_ratio = pending_aspect;
-    pending_aspect = -1;
+    s.window_width = pending_resolution.first;
+    s.window_height = pending_resolution.second;
     pending_resolution = {0, 0};
 }
 
-// imgui_mutex held: the size the fullscreen modes show for the panel's aspect ratio.
+// imgui_mutex held: the size the fullscreen modes show.
 std::pair<int, int> ShownFullscreen() {
     const auto& s = DeceptionSettings::Get();
-    if (pending_aspect < 0 && s.fullscreen_width > 0) return {s.fullscreen_width.load(), s.fullscreen_height.load()};
-    return DeceptionSettings::PickFullscreen(s.display_mode == DeceptionGraphics::Fullscreen, ShownAspect(),
+    if (s.fullscreen_width > 0) return {s.fullscreen_width.load(), s.fullscreen_height.load()};
+    return DeceptionSettings::PickFullscreen(s.display_mode == DeceptionGraphics::Fullscreen, DeceptionSettings::Aspect16x9,
                                            {s.desktop_width, s.desktop_height}, s.modes)
         .picture;
 }
@@ -341,15 +329,8 @@ void ChangeDisplayRow(int row, int delta) {
     auto& s = DeceptionSettings::Get();
     switch (row) {
     case RowMode: s.display_mode = (s.display_mode + delta + G::DisplayModeCount) % G::DisplayModeCount; break;
-    case RowAspect: { // the window moves to the new shape's size nearest in height
-        const int next = (ShownAspect() + delta + DeceptionSettings::AspectRatioCount) % DeceptionSettings::AspectRatioCount;
-        pending_aspect = next;
-        pending_resolution = DeceptionSettings::NearestHeight(s.resolutions[next], ShownResolution().second);
-        pending_since = std::chrono::steady_clock::now();
-        break;
-    }
     case RowResolution: { // windowed only, listed largest first: right steps up to a larger size
-        const auto& sizes = s.resolutions[ShownAspect()];
+        const auto& sizes = s.resolutions[DeceptionSettings::Aspect16x9];
         if (sizes.empty() || s.display_mode != G::Windowed) return;
         const std::pair<int, int> now = ShownResolution();
         int at = 0;
@@ -408,25 +389,16 @@ DisplayRowText DisplayRowAt(int row) {
         std::string help = "Windowed, a borderless window covering the screen, or exclusive fullscreen.";
         if (s.display_mode != DeceptionGraphics::Windowed) {
             const auto [fw, fh] = ShownFullscreen();
-            help += " Fullscreen picks its size from the screen and the aspect ratio, now " + std::to_string(fw) +
-                    " x " + std::to_string(fh) + ", with black bars when the screen is of another shape.";
+            help += " Fullscreen picks its size from the screen, now " + std::to_string(fw) + " x " +
+                    std::to_string(fh) + ", with black bars when the screen is not 16:9.";
         }
         return {"Window mode", names[std::clamp(s.display_mode.load(), 0, 2)], help};
-    }
-    case RowAspect: {
-        const int ratio = ShownAspect();
-        std::string text(DeceptionSettings::AspectRatioKeys[ratio]);
-        if (ratio == DeceptionSettings::Aspect16x9) text += "  (PS4)";
-        if (ratio != s.startup_aspect_ratio) text += "  (after restart)";
-        return {"Aspect ratio", text,
-                "The window's shape: a window takes sizes of this shape; fullscreen picks one from the screen. "
-                "The game itself stays 16:9, with black bars on other shapes. Takes effect after a restart."};
     }
     case RowResolution: {
         const auto [w, h] = ShownResolution();
         const bool windowed = s.display_mode == DeceptionGraphics::Windowed;
-        return {"Windowed resolution", std::to_string(w) + " x " + std::to_string(h) + "  " + DeceptionSettings::AspectLabel(w, h),
-                "The window's size, among those of the aspect ratio that fit the screen.", windowed, windowed};
+        return {"Windowed resolution", std::to_string(w) + " x " + std::to_string(h),
+                "The window's size, among the 16:9 sizes that fit the screen.", windowed, windowed};
     }
     case RowMonitor: {
         std::string name = "Primary display";
@@ -448,11 +420,17 @@ DisplayRowText DisplayRowAt(int row) {
     }
 }
 
-// Text as the game's menus draw it: white, with a soft dark shadow below and to the right.
+// Text as the game's dialogs draw it: cream, over a soft dark shadow below and to the right.
 void PageText(ImDrawList* dl, ImFont* font, float size, ImVec2 at, const char* text, ImU32 color = PageInk::Text) {
-    const float d = std::max(1.0f, size * 0.05f);
+    const float d = std::max(1.0f, size * 0.06f);
     dl->AddText(font, size, ImVec2(at.x + d, at.y + d), PageInk::Shadow, text);
     dl->AddText(font, size, at, color, text);
+}
+float TextWidth(ImFont* font, float size, const char* text) { return font->CalcTextSizeA(size, FLT_MAX, 0.0f, text).x; }
+
+// A small gold diamond (the game's frames end their lines with one).
+void Diamond(ImDrawList* dl, ImVec2 at, float r, ImU32 color) {
+    dl->AddQuadFilled(ImVec2(at.x, at.y - r), ImVec2(at.x + r, at.y), ImVec2(at.x, at.y + r), ImVec2(at.x - r, at.y), color);
 }
 
 // An arrow ("<" for dir -1, ">" for 1) as one stroke, centred on `at`.
@@ -462,23 +440,151 @@ void Chevron(ImDrawList* dl, ImVec2 at, float size, int dir, ImU32 color, float 
     dl->AddPolyline(points, 3, color, ImDrawFlags_None, thickness);
 }
 
-// The game's bar: a band whose ends slant inward by `slant` at the bottom (its menu items, the
-// header tab and the button hints), filled top to bottom from `top` to `low`.
-void SlantedBar(ImDrawList* dl, ImVec2 a, ImVec2 b, float slant, ImU32 top, ImU32 low) {
-    const int first = dl->VtxBuffer.Size;
-    const ImVec2 points[4] = {a, ImVec2(b.x, a.y), ImVec2(b.x - slant, b.y), ImVec2(a.x + slant, b.y)};
-    dl->AddConvexPolyFilled(points, 4, top);
-    ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, first, dl->VtxBuffer.Size, a, ImVec2(a.x, b.y), top, low);
-}
-void SlantedOutline(ImDrawList* dl, ImVec2 a, ImVec2 b, float slant, ImU32 color, float thickness) {
-    const ImVec2 points[4] = {a, ImVec2(b.x, a.y), ImVec2(b.x - slant, b.y), ImVec2(a.x + slant, b.y)};
-    dl->AddPolyline(points, 4, color, ImDrawFlags_Closed, thickness);
+// The ornament at each end of the chosen answer: a gold lance pointing at the band (dir 1 points
+// right), a crescent behind its tip and a diamond at its point.
+void Ornament(ImDrawList* dl, ImVec2 tip, float size, int dir, float px) {
+    const float d = float(dir), line = std::max(1.0f, 2.0f * px);
+    const ImVec2 back(tip.x - d * size * 1.6f, tip.y);
+    dl->AddLine(back, ImVec2(tip.x - d * size * 0.35f, tip.y), PageInk::GoldHi, line);
+    const ImVec2 c(tip.x - d * size * 0.95f, tip.y);
+    const float r = size * 0.42f, a0 = dir > 0 ? IM_PI * 0.55f : -IM_PI * 0.45f;
+    dl->PathArcTo(c, r, a0, a0 + IM_PI * 0.9f, 16);
+    dl->PathStroke(PageInk::GoldHi, ImDrawFlags_None, line);
+    Diamond(dl, c, size * 0.16f, PageInk::GoldHi);
+    Diamond(dl, ImVec2(tip.x - d * size * 0.25f, tip.y), size * 0.2f, PageInk::GoldHi);
 }
 
-// The Display Settings panel, drawn like the game's own menus over the dimmed game: a framed
-// panel with the title on a tab above it, one teal bar per setting (the focused one bright, with
-// arrows around its value), the focused setting's help below, and the buttons on tabs at the
-// bottom.
+// A thin gold rule from x0 to x1 with a diamond at each end and one in the middle.
+void Rule(ImDrawList* dl, float x0, float x1, float y, float px) {
+    const float line = std::max(1.0f, 1.5f * px);
+    dl->AddLine(ImVec2(x0, y), ImVec2(x1, y), PageInk::Gold, line);
+    Diamond(dl, ImVec2(x0, y), 4.0f * px, PageInk::Gold);
+    Diamond(dl, ImVec2(x1, y), 4.0f * px, PageInk::Gold);
+    Diamond(dl, ImVec2((x0 + x1) * 0.5f, y), 6.0f * px, PageInk::GoldHi);
+}
+
+// A scrolled flourish in a frame's corner `c`, curling inward along (sx, sy) (each 1 or -1).
+void Flourish(ImDrawList* dl, ImVec2 c, float sx, float sy, float px) {
+    const float k = 22.0f * px, line = std::max(1.0f, 1.8f * px);
+    auto at = [&](float x, float y) { return ImVec2(c.x + sx * x * k, c.y + sy * y * k); };
+    // Two scrolls leave the corner along each edge and curl back into small rings.
+    dl->AddBezierCubic(at(0.35f, 0.35f), at(1.6f, 0.2f), at(2.6f, 1.4f), at(1.7f, 1.5f), PageInk::GoldHi, line, 20);
+    dl->AddBezierCubic(at(0.35f, 0.35f), at(0.2f, 1.6f), at(1.4f, 2.6f), at(1.5f, 1.7f), PageInk::GoldHi, line, 20);
+    dl->AddCircle(at(1.75f, 1.25f), 0.24f * k, PageInk::Gold, 12, line);
+    dl->AddCircle(at(1.25f, 1.75f), 0.24f * k, PageInk::Gold, 12, line);
+    // A leaf along each edge, and a diamond in the corner.
+    dl->AddBezierQuadratic(at(0.6f, 0.3f), at(2.4f, 0.0f), at(3.4f, 0.3f), PageInk::Gold, line, 12);
+    dl->AddBezierQuadratic(at(0.3f, 0.6f), at(0.0f, 2.4f), at(0.3f, 3.4f), PageInk::Gold, line, 12);
+    Diamond(dl, at(0.55f, 0.55f), 0.32f * k, PageInk::GoldHi);
+}
+
+// The game's dialog panel: near black, inside a bright gold line with a darker one just within it,
+// and a flourish in each corner.
+void GoldPanel(ImDrawList* dl, ImVec2 a, ImVec2 b, float px) {
+    dl->AddRectFilled(a, b, PageInk::Panel);
+    dl->AddRect(a, b, PageInk::GoldHi, 0.0f, 0, std::max(1.0f, 3.0f * px));
+    const float in = 7.0f * px;
+    dl->AddRect(ImVec2(a.x + in, a.y + in), ImVec2(b.x - in, b.y - in), PageInk::GoldDim, 0.0f, 0, std::max(1.0f, 1.5f * px));
+    Flourish(dl, a, 1.0f, 1.0f, px);
+    Flourish(dl, ImVec2(b.x, a.y), -1.0f, 1.0f, px);
+    Flourish(dl, ImVec2(a.x, b.y), 1.0f, -1.0f, px);
+    Flourish(dl, b, -1.0f, -1.0f, px);
+}
+
+// One answer or setting row. The chosen one is an amber band, brightest in the middle, between gold
+// lines with an ornament at each end; the others sit in a dark outline, as the game's YES and NO.
+void ChoiceRow(ImDrawList* dl, ImVec2 a, ImVec2 b, bool focus, float px) {
+    const float line = std::max(1.0f, 1.5f * px);
+    if (!focus) {
+        dl->AddRect(a, b, PageInk::Hair, 0.0f, 0, line);
+        return;
+    }
+    const float mid = (a.x + b.x) * 0.5f;
+    int first = dl->VtxBuffer.Size;
+    dl->AddRectFilled(a, ImVec2(mid, b.y), PageInk::BarMid);
+    ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, first, dl->VtxBuffer.Size, a, ImVec2(mid, a.y), PageInk::BarEdge,
+                                                  PageInk::BarMid);
+    first = dl->VtxBuffer.Size;
+    dl->AddRectFilled(ImVec2(mid, a.y), b, PageInk::BarMid);
+    ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, first, dl->VtxBuffer.Size, ImVec2(mid, a.y), ImVec2(b.x, a.y),
+                                                  PageInk::BarMid, PageInk::BarEdge);
+    dl->AddLine(a, ImVec2(b.x, a.y), PageInk::Gold, line);
+    dl->AddLine(ImVec2(a.x, b.y), b, PageInk::Gold, line);
+    const float y = (a.y + b.y) * 0.5f, size = (b.y - a.y) * 0.62f;
+    Ornament(dl, ImVec2(a.x + size * 0.2f, y), size, 1, px);
+    Ornament(dl, ImVec2(b.x - size * 0.2f, y), size, -1, px);
+}
+
+// A pad button as the game's hints show it: a dark disc in a light ring, with the button's mark.
+enum class Button { Cross, Circle, UpDown, LeftRight };
+void ButtonIcon(ImDrawList* dl, ImVec2 c, float r, Button button, float px) {
+    const float line = std::max(1.0f, 2.0f * px), m = r * 0.45f;
+    dl->AddCircleFilled(c, r, PageInk::IconFill, 24);
+    dl->AddCircle(c, r, PageInk::Text, 24, line);
+    switch (button) {
+    case Button::Cross:
+        dl->AddLine(ImVec2(c.x - m, c.y - m), ImVec2(c.x + m, c.y + m), PageInk::Text, line * 1.3f);
+        dl->AddLine(ImVec2(c.x - m, c.y + m), ImVec2(c.x + m, c.y - m), PageInk::Text, line * 1.3f);
+        break;
+    case Button::Circle: dl->AddCircle(c, m, PageInk::Text, 20, line * 1.3f); break;
+    case Button::UpDown:
+        dl->AddTriangleFilled(ImVec2(c.x, c.y - m * 1.2f), ImVec2(c.x - m * 0.7f, c.y - m * 0.2f),
+                              ImVec2(c.x + m * 0.7f, c.y - m * 0.2f), PageInk::Text);
+        dl->AddTriangleFilled(ImVec2(c.x, c.y + m * 1.2f), ImVec2(c.x + m * 0.7f, c.y + m * 0.2f),
+                              ImVec2(c.x - m * 0.7f, c.y + m * 0.2f), PageInk::Text);
+        break;
+    case Button::LeftRight:
+        dl->AddTriangleFilled(ImVec2(c.x - m * 1.2f, c.y), ImVec2(c.x - m * 0.2f, c.y + m * 0.7f),
+                              ImVec2(c.x - m * 0.2f, c.y - m * 0.7f), PageInk::Text);
+        dl->AddTriangleFilled(ImVec2(c.x + m * 1.2f, c.y), ImVec2(c.x + m * 0.2f, c.y - m * 0.7f),
+                              ImVec2(c.x + m * 0.2f, c.y + m * 0.7f), PageInk::Text);
+        break;
+    }
+}
+
+struct Hint {
+    Button button;
+    const char* text;
+};
+// The bottom of a page as the game's: the help sentence centred over a long gold rule, the buttons
+// under the rule's right end, and the keyboard's keys under its left end.
+void PageFooter(ImDrawList* dl, ImVec2 o, ImVec2 size, float px, const std::string& help, const Hint* hints, int count,
+                const char* keys) {
+    const float margin = std::max(60.0f * px, size.x * 0.08f), x0 = o.x + margin, x1 = o.x + size.x - margin;
+    const float rule_y = o.y + size.y - 92.0f * px, help_size = 30.0f * px, wrap = x1 - x0 - 40.0f * px;
+    const float band = o.y + size.y - 230.0f * px;
+    dl->AddRectFilledMultiColor(ImVec2(o.x, band), ImVec2(o.x + size.x, band + 80.0f * px), IM_COL32(0, 0, 0, 0),
+                                IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0xe8), IM_COL32(0, 0, 0, 0xe8));
+    dl->AddRectFilled(ImVec2(o.x, band + 80.0f * px), ImVec2(o.x + size.x, o.y + size.y), IM_COL32(0, 0, 0, 0xe8));
+    if (!help.empty()) {
+        const ImVec2 hs = text_font->CalcTextSizeA(help_size, FLT_MAX, wrap, help.c_str());
+        const float hy = rule_y - 18.0f * px - hs.y, hx = o.x + (size.x - std::min(hs.x, wrap)) * 0.5f;
+        dl->AddText(text_font, help_size, ImVec2(hx + 1.5f * px, hy + 1.5f * px), PageInk::Shadow, help.c_str(), nullptr, wrap);
+        dl->AddText(text_font, help_size, ImVec2(hx, hy), PageInk::Help, help.c_str(), nullptr, wrap);
+    }
+    Rule(dl, x0, x1, rule_y, px);
+    const float hint_size = 28.0f * px, r = 15.0f * px, y = rule_y + 34.0f * px;
+    float x = x1;
+    for (int i = count - 1; i >= 0; --i) {
+        x -= TextWidth(text_font, hint_size, hints[i].text);
+        PageText(dl, text_font, hint_size, ImVec2(x, y - hint_size * 0.55f), hints[i].text);
+        x -= r + 8.0f * px;
+        ButtonIcon(dl, ImVec2(x, y), r, hints[i].button, px);
+        x -= r + 30.0f * px;
+    }
+    PageText(dl, text_font, 22.0f * px, ImVec2(x0, y - 22.0f * px * 0.55f), keys, PageInk::TextDim);
+}
+
+std::string Upper(const char* text) {
+    std::string out(text);
+    for (char& c : out) c = char(std::toupper(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// The Display Settings page, drawn like the game's dialogs over the dimmed game: the title in the
+// game's capitals over a gold rule inside a gold-framed panel, one row per setting (the chosen one
+// on the amber band, with arrows around its value), and at the bottom the chosen setting's help,
+// the buttons and the keys.
 void DisplaySettingsBox() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float px = viewport->Size.y / 1080.0f;
@@ -489,87 +595,55 @@ void DisplaySettingsBox() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImFont* font = ImGui::GetFont();
     const ImVec2 o = viewport->Pos, size = viewport->Size;
-    const float right = o.x + size.x, bottom = o.y + size.y, line = std::max(1.0f, 2.0f * px);
-    dl->AddRectFilled(o, ImVec2(right, bottom), PageInk::Shade);
+    dl->AddRectFilled(o, ImVec2(o.x + size.x, o.y + size.y), PageInk::Shade);
 
-    // The panel, centred, and the title tab on its top edge.
-    const float row_h = 64.0f * px, gap = 12.0f * px, pad = 30.0f * px;
-    const float panel_w = std::min(size.x - 80.0f * px, 1180.0f * px);
-    const float panel_h = pad * 2.0f + float(RowCount) * row_h + float(RowCount - 1) * gap;
+    const float row_h = 58.0f * px, gap = 10.0f * px, pad = 56.0f * px, title_size = 50.0f * px;
+    const float head = title_size + 46.0f * px;
+    const float panel_w = std::min(size.x - 80.0f * px, 1120.0f * px);
+    const float panel_h = pad * 2.0f + head + float(RowCount) * row_h + float(RowCount - 1) * gap;
     const float x0 = o.x + (size.x - panel_w) * 0.5f, x1 = x0 + panel_w;
-    const float top = o.y + std::max(110.0f * px, (size.y - panel_h) * 0.42f);
-    dl->AddRectFilled(ImVec2(x0, top), ImVec2(x1, top + panel_h), PageInk::Panel, 10.0f * px);
-    dl->AddRect(ImVec2(x0, top), ImVec2(x1, top + panel_h), PageInk::Frame, 10.0f * px, 0, line);
+    const float top = o.y + std::max(40.0f * px, (size.y - 190.0f * px - panel_h) * 0.5f);
+    GoldPanel(dl, ImVec2(x0, top), ImVec2(x1, top + panel_h), px);
 
     const char* title = "DISPLAY SETTINGS";
-    const float title_size = 46.0f * px, title_w = font->CalcTextSizeA(title_size, FLT_MAX, 0.0f, title).x;
-    const float tab_w = title_w + 120.0f * px, tab_h = 62.0f * px, tab_x = o.x + (size.x - tab_w) * 0.5f;
-    const ImVec2 tab_a(tab_x, top - tab_h + 8.0f * px), tab_b(tab_x + tab_w, top + 8.0f * px);
-    SlantedBar(dl, tab_a, tab_b, 18.0f * px, PageInk::RowLow, PageInk::Panel);
-    SlantedOutline(dl, tab_a, tab_b, 18.0f * px, PageInk::Frame, line);
-    PageText(dl, font, title_size, ImVec2(tab_x + (tab_w - title_w) * 0.5f, tab_a.y + (tab_h - title_size) * 0.5f),
-             title);
+    const float title_w = TextWidth(title_font, title_size, title);
+    PageText(dl, title_font, title_size, ImVec2(o.x + (size.x - title_w) * 0.5f, top + pad - 14.0f * px), title,
+             PageInk::Title);
+    Rule(dl, x0 + panel_w * 0.22f, x1 - panel_w * 0.22f, top + pad + title_size + 6.0f * px, px);
 
-    // One bar per setting: its name on the left, its value on the right.
-    const float label = 32.0f * px, value = 30.0f * px, slant = 14.0f * px;
-    const float bx0 = x0 + pad, bx1 = x1 - pad;
-    float y = top + pad;
+    const float label = 30.0f * px, value = 30.0f * px, inset = 64.0f * px;
+    const float bx0 = x0 + pad + 30.0f * px, bx1 = x1 - pad - 30.0f * px;
+    float y = top + pad + head;
     std::string help;
     for (int row = 0; row < RowCount; ++row) {
         const DisplayRowText text = DisplayRowAt(row);
         const bool focus = row == display_row;
         const ImVec2 a(bx0, y), b(bx1, y + row_h);
         const float mid = y + row_h * 0.5f;
-        const bool off = !text.enabled;
-        SlantedBar(dl, a, b, slant, focus ? PageInk::Focus : off ? PageInk::RowOff : PageInk::Row,
-                   focus ? PageInk::FocusLow : off ? PageInk::RowOffLow : PageInk::RowLow);
-        SlantedOutline(dl, a, b, slant, focus ? PageInk::Frame : PageInk::FrameDim, focus ? line * 1.5f : line);
-        const ImU32 ink = focus ? PageInk::Text : off ? PageInk::TextOff : PageInk::TextDim;
-        PageText(dl, font, label, ImVec2(bx0 + slant + 28.0f * px, mid - label * 0.56f), text.label, ink);
-        const float vw = font->CalcTextSizeA(value, FLT_MAX, 0.0f, text.value.c_str()).x;
-        const float value_x = bx1 - slant - 70.0f * px - vw;
-        PageText(dl, font, value, ImVec2(value_x, mid - value * 0.56f), text.value.c_str(), ink);
+        ChoiceRow(dl, a, b, focus, px);
+        const ImU32 ink = !text.enabled ? PageInk::TextOff : focus ? PageInk::Text : PageInk::TextDim;
+        PageText(dl, text_font, label, ImVec2(bx0 + inset, mid - label * 0.55f), Upper(text.label).c_str(), ink);
+        const float vw = TextWidth(text_font, value, text.value.c_str());
+        const float value_x = bx1 - inset - 34.0f * px - vw;
+        PageText(dl, text_font, value, ImVec2(value_x, mid - value * 0.55f), text.value.c_str(), ink);
         if (focus && text.changes) {
-            const float chevron = row_h * 0.36f, stroke = 3.0f * px;
-            Chevron(dl, ImVec2(value_x - 26.0f * px, mid), chevron, -1, PageInk::Text, stroke);
-            Chevron(dl, ImVec2(bx1 - slant - 40.0f * px, mid), chevron, 1, PageInk::Text, stroke);
+            const float chevron = row_h * 0.34f, stroke = 2.5f * px;
+            Chevron(dl, ImVec2(value_x - 24.0f * px, mid), chevron, -1, PageInk::GoldHi, stroke);
+            Chevron(dl, ImVec2(bx1 - inset - 12.0f * px, mid), chevron, 1, PageInk::GoldHi, stroke);
         }
         if (focus) help = text.help;
         y += row_h + gap;
     }
 
-    // The focused setting's help under the panel, wrapped to its width.
-    const float help_size = 26.0f * px;
-    dl->AddText(font, help_size, ImVec2(x0 + 8.0f * px, top + panel_h + 22.0f * px), PageInk::Help, help.c_str(), nullptr,
-                panel_w - 16.0f * px);
-
-    // The buttons, each on a tab, along the bottom.
-    const char* const hints[3] = {"Up/Down  Choose",
-                                  "Left/Right, Cross (A)  Change",
-                                  "Circle (B), Select, Esc  Back"};
-    const float hint_size = 24.0f * px, hint_h = 46.0f * px, hint_gap = 24.0f * px;
-    float hint_w[3], total = 0.0f;
-    for (int i = 0; i < 3; ++i) {
-        hint_w[i] = font->CalcTextSizeA(hint_size, FLT_MAX, 0.0f, hints[i]).x + 70.0f * px;
-        total += hint_w[i] + (i ? hint_gap : 0.0f);
-    }
-    float hx = o.x + (size.x - total) * 0.5f;
-    const float hy = bottom - hint_h - 30.0f * px;
-    for (int i = 0; i < 3; ++i) {
-        const ImVec2 a(hx, hy), b(hx + hint_w[i], hy + hint_h);
-        SlantedBar(dl, a, b, 12.0f * px, PageInk::Row, PageInk::RowLow);
-        SlantedOutline(dl, a, b, 12.0f * px, PageInk::FrameDim, line);
-        PageText(dl, font, hint_size, ImVec2(hx + 35.0f * px, hy + (hint_h - hint_size) * 0.5f), hints[i]);
-        hx += hint_w[i] + hint_gap;
-    }
+    const Hint hints[3] = {{Button::UpDown, "Choose"}, {Button::LeftRight, "Change"}, {Button::Circle, "Back"}};
+    PageFooter(dl, o, size, px, help, hints, 3, "Keyboard: arrow keys, Enter, Esc or F10");
     ImGui::End();
     ImGui::PopStyleVar();
 }
 
-// The exit prompt, drawn like the Display Settings panel: the question on a tab over a small
-// framed panel holding No and Yes, the focused one bright, and the buttons on tabs at the bottom.
+// The exit prompt, drawn like the game's own questions: the question over YES and NO in a gold
+// frame, NO chosen first, and the buttons at the bottom.
 void ExitPromptBox() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float px = viewport->Size.y / 1080.0f;
@@ -580,58 +654,36 @@ void ExitPromptBox() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImFont* font = ImGui::GetFont();
     const ImVec2 o = viewport->Pos, size = viewport->Size;
-    const float right = o.x + size.x, bottom = o.y + size.y, line = std::max(1.0f, 2.0f * px);
-    dl->AddRectFilled(o, ImVec2(right, bottom), PageInk::Shade);
+    dl->AddRectFilled(o, ImVec2(o.x + size.x, o.y + size.y), PageInk::Shade);
 
-    const float row_h = 64.0f * px, gap = 12.0f * px, pad = 30.0f * px;
-    const float panel_w = std::min(size.x - 80.0f * px, 640.0f * px), panel_h = pad * 2.0f + row_h * 2.0f + gap;
+    const float row_h = 50.0f * px, pad = 50.0f * px, question_size = 36.0f * px, text_size = 34.0f * px;
+    const float panel_w = std::min(size.x - 80.0f * px, 820.0f * px);
+    const float panel_h = pad * 2.0f + question_size + 60.0f * px + row_h * 2.0f;
     const float x0 = o.x + (size.x - panel_w) * 0.5f, x1 = x0 + panel_w;
-    const float top = o.y + (size.y - panel_h) * 0.5f;
-    dl->AddRectFilled(ImVec2(x0, top), ImVec2(x1, top + panel_h), PageInk::Panel, 10.0f * px);
-    dl->AddRect(ImVec2(x0, top), ImVec2(x1, top + panel_h), PageInk::Frame, 10.0f * px, 0, line);
+    const float top = o.y + (size.y - panel_h) * 0.45f;
+    GoldPanel(dl, ImVec2(x0, top), ImVec2(x1, top + panel_h), px);
 
-    const char* title = "EXIT DECEPTION?";
-    const float title_size = 46.0f * px, title_w = font->CalcTextSizeA(title_size, FLT_MAX, 0.0f, title).x;
-    const float tab_w = title_w + 120.0f * px, tab_h = 62.0f * px, tab_x = o.x + (size.x - tab_w) * 0.5f;
-    const ImVec2 tab_a(tab_x, top - tab_h + 8.0f * px), tab_b(tab_x + tab_w, top + 8.0f * px);
-    SlantedBar(dl, tab_a, tab_b, 18.0f * px, PageInk::RowLow, PageInk::Panel);
-    SlantedOutline(dl, tab_a, tab_b, 18.0f * px, PageInk::Frame, line);
-    PageText(dl, font, title_size, ImVec2(tab_x + (tab_w - title_w) * 0.5f, tab_a.y + (tab_h - title_size) * 0.5f),
-             title);
+    const char* question = "Exit Deception?";
+    PageText(dl, text_font, question_size,
+             ImVec2(o.x + (size.x - TextWidth(text_font, question_size, question)) * 0.5f, top + pad), question);
 
-    const char* const answers[2] = {"No", "Yes"};
-    const float text_size = 34.0f * px, slant = 14.0f * px;
-    float y = top + pad;
+    // YES above NO, as the game asks; exit_focus 1 is Yes.
+    const char* const answers[2] = {"YES", "NO"};
+    float y = top + pad + question_size + 60.0f * px;
     for (int i = 0; i < 2; ++i) {
-        const bool focus = i == exit_focus;
-        const ImVec2 a(x0 + pad, y), b(x1 - pad, y + row_h);
-        SlantedBar(dl, a, b, slant, focus ? PageInk::Focus : PageInk::Row, focus ? PageInk::FocusLow : PageInk::RowLow);
-        SlantedOutline(dl, a, b, slant, focus ? PageInk::Frame : PageInk::FrameDim, focus ? line * 1.5f : line);
-        const float tw = font->CalcTextSizeA(text_size, FLT_MAX, 0.0f, answers[i]).x;
-        PageText(dl, font, text_size, ImVec2((a.x + b.x - tw) * 0.5f, y + (row_h - text_size) * 0.5f), answers[i],
+        const int answer = 1 - i;
+        const bool focus = answer == exit_focus;
+        const ImVec2 a(x0 + panel_w * 0.18f, y), b(x1 - panel_w * 0.18f, y + row_h);
+        ChoiceRow(dl, a, b, focus, px);
+        const float tw = TextWidth(text_font, text_size, answers[i]);
+        PageText(dl, text_font, text_size, ImVec2((a.x + b.x - tw) * 0.5f, y + (row_h - text_size) * 0.5f), answers[i],
                  focus ? PageInk::Text : PageInk::TextDim);
-        y += row_h + gap;
+        y += row_h;
     }
 
-    const char* const hints[3] = {"Up/Down  Choose", "Cross (A), Enter  Confirm",
-                                  "Circle (B), Esc  Cancel"};
-    const float hint_size = 24.0f * px, hint_h = 46.0f * px, hint_gap = 24.0f * px;
-    float hint_w[3], total = 0.0f;
-    for (int i = 0; i < 3; ++i) {
-        hint_w[i] = font->CalcTextSizeA(hint_size, FLT_MAX, 0.0f, hints[i]).x + 70.0f * px;
-        total += hint_w[i] + (i ? hint_gap : 0.0f);
-    }
-    float hx = o.x + (size.x - total) * 0.5f;
-    const float hy = bottom - hint_h - 30.0f * px;
-    for (int i = 0; i < 3; ++i) {
-        const ImVec2 a(hx, hy), b(hx + hint_w[i], hy + hint_h);
-        SlantedBar(dl, a, b, 12.0f * px, PageInk::Row, PageInk::RowLow);
-        SlantedOutline(dl, a, b, 12.0f * px, PageInk::FrameDim, line);
-        PageText(dl, font, hint_size, ImVec2(hx + 35.0f * px, hy + (hint_h - hint_size) * 0.5f), hints[i]);
-        hx += hint_w[i] + hint_gap;
-    }
+    const Hint hints[3] = {{Button::UpDown, "Choose"}, {Button::Cross, "Confirm"}, {Button::Circle, "Cancel"}};
+    PageFooter(dl, o, size, px, std::string(), hints, 3, "Keyboard: arrow keys, Enter, Esc");
     ImGui::End();
     ImGui::PopStyleVar();
 }
@@ -662,7 +714,7 @@ bool HandleExitEvent(const SDL_Event& event) {
         return event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
     }
     if (move) {
-        exit_focus = std::clamp(exit_focus + move, 0, 1);
+        exit_focus = std::clamp(exit_focus - move, 0, 1);
     }
     if (answer >= 0) {
         exit_open = false;
@@ -850,6 +902,12 @@ void ConfigureContext() {
     font_config.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(deception_font_ttf),
                                    int(deception_font_ttf_end - deception_font_ttf), 18.0f, &font_config);
+    title_font = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(deception_title_font_ttf),
+                                                int(deception_title_font_ttf_end - deception_title_font_ttf), 18.0f,
+                                                &font_config);
+    text_font = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(deception_text_font_ttf),
+                                               int(deception_text_font_ttf_end - deception_text_font_ttf), 18.0f,
+                                               &font_config);
 }
 
 // imgui_mutex held. The backend frees a texture some frames after its last use.

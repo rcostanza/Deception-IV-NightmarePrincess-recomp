@@ -314,7 +314,8 @@ static void *host_thread(void *arg) {
  * tokens, re-read when it changes: button names (cross circle square triangle l1 r1 l2 r2 l3 r3
  * options touchpad up down left right) are held while listed; lx= ly= rx= ry= (0..255) override
  * the sticks; reconnect closes the gamepad once per edit and the host thread opens
- * it again, as after a real reconnect. An empty file releases everything. */
+ * it again, as after a real reconnect; display_settings and exit_prompt open those pages, as F10
+ * and F4 do. An empty file releases everything. */
 static struct { uint32_t buttons; int stick[4]; } injected={0,{-1,-1,-1,-1}};
 static int replay_armed;      /* 1 while a DECEPTION_PAD_REPLAY recording plays, 2 once it ended */
 static uint64_t replay_start; /* 0: (re)start at the next sample */
@@ -345,6 +346,8 @@ static void read_inject(void) {
     while (fscanf(f,"%63s",token)==1) {
         if (!strcmp(token,"replay") && replay_armed!=1) { replay_armed=1; replay_start=0; } /* DECEPTION_PAD_REPLAY */
         if (!strcmp(token,"reconnect")) reconnect=1;
+        if (!strcmp(token,"display_settings") && !deception_display_settings_is_open()) deception_display_settings_open();
+        if (!strcmp(token,"exit_prompt")) deception_exit_prompt_open();
         for (size_t i=0;i<sizeof(ps_names)/sizeof(*ps_names);++i) if (!strcmp(token,ps_names[i].name)) injected.buttons|=ps_names[i].ps;
         for (int i=0;i<4;++i) if (!strncmp(token,sticks[i],3)) { int v=atoi(token+3); injected.stick[i]=v<0 ? 0 : v>255 ? 255 : v; }
     }

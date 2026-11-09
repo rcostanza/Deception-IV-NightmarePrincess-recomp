@@ -19,6 +19,7 @@ start deception.exe or the desktop shortcut it offers.
                     a private assembly, which deception.exe's manifest depends on (res/libs.manifest)
     release.txt     this release; the setup stamps the image it prepares with it (src/launcher.c)
     README.txt, LICENSE.txt
+    licenses/       the licenses of the fonts embedded in deception (DejaVu Sans, Cinzel, Josefin Slab)
     prepare/        run.py, scripts/ and settings.example.ini, run by the setup;
                     prepare/python/ holds Python for it when --python names the python.org
                     "embeddable package" (folder or .zip); otherwise the player needs Python 3.10+.
@@ -91,7 +92,7 @@ deception.log, in the log folder of your save folder. Shader caches are kept in 
 folder here.
 
 Needs Windows 10/11 x64, a CPU with AVX and a GPU with Vulkan 1.3.{python_note}
-Source and license (GPL-2.0-or-later): see LICENSE.txt.
+Source and license (GPL-2.0-or-later): see LICENSE.txt; the fonts' licenses are in licenses.
 {debug_note}"""
 LINUX_README = """Deception IV: The Nightmare Princess on PC (Linux)
 Release {release}
@@ -120,7 +121,7 @@ folder here.
 
 Needs Linux x86-64 with glibc 2.39 or newer (SteamOS 3.7, Ubuntu 24.04, Debian 13, Fedora 40 or
 newer), python3 3.10+ for the setup, a CPU with AVX and a GPU with a Vulkan 1.3 driver.
-Source and license (GPL-2.0-or-later): see LICENSE.txt.
+Source and license (GPL-2.0-or-later): see LICENSE.txt; the fonts' licenses are in licenses.
 """
 PYTHON_NOTE = '\nThe setup needs Python 3.10 or newer (python.org) to prepare the game.'
 DEBUG_NOTE = """
@@ -369,6 +370,9 @@ def main():
                                                        debug_note=DEBUG_NOTE if a.debug else '')
                                          .replace('\n', '\r\n').encode())
     ship(PORT / 'LICENSE', 'LICENSE.txt')
+    # The overlay's embedded fonts: their licenses go with them.
+    for font_license in sorted((PORT / 'gpu' / 'third_party' / 'fonts').glob('LICENSE-*.txt')):
+        ship(font_license, f'licenses/{font_license.name}')
     shipped += ['release.txt', 'README.txt']
     size = sum((out / name).stat().st_size for name in shipped)
     if LINUX:

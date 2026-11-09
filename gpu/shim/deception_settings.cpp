@@ -55,14 +55,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.window_width = w;
         v.window_height = h;
     } else if (key == "aspect_ratio") {
-        int ratio = Aspect16x9;
-        for (int r = 0; r < AspectRatioCount; ++r) {
-            if (value == AspectRatioKeys[r]) ratio = r;
-        }
-        if (!value.empty() && value != AspectRatioKeys[ratio]) {
-            std::printf("Settings: aspect_ratio=%s is not 4:3, 16:9, 21:9 or 32:9; using 16:9\n", value.c_str());
-        }
-        v.startup_aspect_ratio = v.aspect_ratio = ratio;
+        // An older settings.ini's key: the game is 16:9 only, so the window is too; the line is
+        // dropped on the next save.
     } else if (key == "skip_intro") {
         v.skip_intro = Truthy(value);
     } else if (key == "sharpening") {
@@ -88,7 +82,6 @@ std::vector<std::pair<std::string, std::string>> DisplayKeys() {
     return {
         {"display_mode", std::string(DeceptionGraphics::DisplayModeKeys[std::clamp(v.display_mode.load(), 0, 2)])},
         {"monitor", monitor < 0 ? std::string() : std::to_string(monitor)},
-        {"aspect_ratio", std::string(AspectRatioKeys[std::clamp(v.aspect_ratio.load(), 0, AspectRatioCount - 1)])},
         {"output_resolution", std::to_string(v.window_width.load()) + "x" + std::to_string(v.window_height.load())},
         {"vsync", v.vsync ? "1" : "0"},
         {"tearing", v.tearing ? "1" : "0"},
@@ -202,7 +195,6 @@ void Load() {
         {"DECEPTION_TEARING", "tearing"},
         {"DECEPTION_MONITOR", "monitor"},           {"DECEPTION_WINDOW", "output_resolution"},
         {"DECEPTION_OUTPUT_RESOLUTION", "output_resolution"},
-        {"DECEPTION_ASPECT_RATIO", "aspect_ratio"},
         {"DECEPTION_AUDIO_CHANNELS", "audio_channels"},
         {"DECEPTION_SKIP_INTRO", "skip_intro"},
         {"DECEPTION_HDR", "hdr"},
