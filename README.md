@@ -2,7 +2,7 @@
 
 # Deception IV: The Nightmare Princess (PS4) - Recompiled to PC
 
-An (obviously) unofficial port of the PS4 version of <b>Deception IV: The Nightmare Princess</b>, KOEI TECMO's unique trap-laying action game (and also severely underrated), to Windows and Linux.
+An (obviously) unofficial port of the PS4 version of <b>Deception IV: The Nightmare Princess</b> to Windows and Linux, the latest game in KOEI TECMO's unique and undeerrated trap-laying action game series.
 
 The game's own x86-64 code runs directly on the PC: the PS4 system libraries it calls are reimplemented, and its GPU commands are drawn with Vulkan.
 
