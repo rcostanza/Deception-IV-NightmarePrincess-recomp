@@ -63,9 +63,13 @@ deception-setup.exe --game <dump> [--update <folder>|--no-update] [--dlc <folder
                     [--save <folder>] [--skip-intro|--play-intro] [--shortcut desktop]
 ```
 
+### Works with RecompLauncher
+
+This port works with [RecompLauncher](https://recomplauncher.com), which installs and updates it from these releases. Pick your dump on its setup screen: it prepares the game (your update is used when it sits next to the dump as `<game>-patch`), and the game's page shows the display, sound and intro settings. Saves go to `save` in the game's folder. The launcher reads `recomplauncher.json`, which comes with every release.
+
 ### On Linux
 
-1. Extract the release anywhere you can write: `tar -xzf deception-pc-<version>-linux.tar.gz -C ~/Games`
+1. Extract the release anywhere you can write: `tar -xzf deception-pc-<version>-linux-x64.tar.gz -C ~/Games`
 2. Run `deception-setup`: from a file manager it asks with dialogs, in a terminal it asks there. It also
    takes the same arguments as on Windows (`--game <dump> [--update <folder>] [--save <folder>] [--dlc <folder>]`).
 3. Start the game from the menu entry it adds, or run `./deception`.

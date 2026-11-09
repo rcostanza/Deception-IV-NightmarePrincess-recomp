@@ -129,15 +129,15 @@ incorrect").
 | Command | `python tools/package.py --python <embed.zip> --zip` | `python tools/package.py --python <embed.zip> --zip --debug --out dist-debug` |
 | Exes | debug info stripped (game exe ~7 MB) | as built, with debug info |
 | `diagnose/` | not included | glitch kit from `packaging/diagnose` |
-| Zip | `out/<release>.zip` | `out/<release>-debug.zip` |
+| Zip | `out/<release>-windows-x64.zip` | `out/<release>-debug.zip` |
 
 `<embed.zip>` is the python.org "Windows embeddable package (64-bit)", for example
 `https://www.python.org/ftp/python/3.15.1/python-3.15.1-embed-amd64.zip`; check its SHA-256 against
 the python.org release page. It becomes `prepare/python`, so players need no Python of their own.
 Without `--python` the setup uses the player's Python 3.10+.
 
-On Linux, `python3 tools/package.py --zip` writes `out/<release>-linux.tar.gz` (also `-symbols`, and
-`-debug` with `--debug`): the game, the setup, the libraries they need in `lib/` less the host's
+On Linux, `python3 tools/package.py --zip` writes `out/<release>-linux-x64.tar.gz` (also `-linux-symbols`, and
+`-linux-debug` with `--debug`): the game, the setup, the libraries they need in `lib/` less the host's
 (glibc, libstdc++, Vulkan, X11/Wayland, audio) and `prepare/`; the setup runs the system's python3.
 `.github/scripts/smoke-test.sh <unpacked release>` checks it as root on a fresh distro (libraries,
 the setup on non-dumps, the start from `paths.ini`); the `linux-smoke` CI job runs it on Ubuntu

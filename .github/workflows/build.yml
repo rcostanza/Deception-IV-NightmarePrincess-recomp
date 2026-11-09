@@ -121,7 +121,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.RELEASE }}
-          path: out/${{ env.RELEASE }}.zip
+          path: out/${{ env.RELEASE }}-windows-x64.zip
           compression-level: 0
       - uses: actions/upload-artifact@v4
         with:
@@ -194,7 +194,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.RELEASE }}-linux
-          path: out/${{ env.RELEASE }}-linux.tar.gz
+          path: out/${{ env.RELEASE }}-linux-x64.tar.gz
           compression-level: 0
       - uses: actions/upload-artifact@v4
         with:
@@ -226,7 +226,7 @@ jobs:
           path: out
       - name: ${{ matrix.image }}
         run: |
-          mkdir -p unpacked && tar -xzf out/*-linux.tar.gz -C unpacked
+          mkdir -p unpacked && tar -xzf out/*-linux-x64.tar.gz -C unpacked
           docker run --rm -v "$PWD:/w" "${{ matrix.image }}" \
             bash /w/.github/scripts/smoke-test.sh "/w/unpacked/${{ needs.linux.outputs.release }}"
 
@@ -264,7 +264,7 @@ jobs:
             echo
             echo "## Install"
             echo
-            echo "Windows: unzip ${WINDOWS}.zip and run deception-setup.exe. Linux: extract ${LINUX}-linux.tar.gz and run deception-setup. You need a decrypted dump of your own copy of Deception IV: The Nightmare Princess (CUSA02859) and its update (1.01); see README.txt."
+            echo "Windows: unzip ${WINDOWS}-windows-x64.zip and run deception-setup.exe. Linux: extract ${LINUX}-linux-x64.tar.gz and run deception-setup. You need a decrypted dump of your own copy of Deception IV: The Nightmare Princess (CUSA02859) and its update (1.01); see README.txt."
           } > notes.md
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
-            --notes-file notes.md "out/${WINDOWS}.zip" "out/${LINUX}-linux.tar.gz"
+            --notes-file notes.md "out/${WINDOWS}-windows-x64.zip" "out/${LINUX}-linux-x64.tar.gz"

@@ -7,7 +7,7 @@
 On Linux the same folder holds deception and deception-setup (rpath $ORIGIN/lib), the
 shared libraries they need in lib/ (ldd, less the host's: glibc, libstdc++, Vulkan, the display
 and audio stacks, which must match its drivers), deception.png for the desktop entry and
-prepare/ without Python: the setup runs the system's python3. --zip writes <release>-linux.tar.gz
+prepare/ without Python: the setup runs the system's python3. --zip writes <release>-linux-x64.tar.gz
 (and -symbols, -debug), which keeps the files' exec bits and symlinks. Needs ldd, patchelf and strip.
 
 The folder is what a player unpacks: they need neither this repo nor MSYS2. They run
@@ -19,6 +19,7 @@ start deception.exe or the desktop shortcut it offers.
                     a private assembly, which deception.exe's manifest depends on (res/libs.manifest)
     release.txt     this release; the setup stamps the image it prepares with it (src/launcher.c)
     README.txt, LICENSE.txt
+    recomplauncher.json  how RecompLauncher (recomplauncher.com) sets up, starts and configures the game
     licenses/       the licenses of the fonts embedded in deception (DejaVu Sans, Cinzel, Josefin Slab)
     prepare/        run.py, scripts/ and settings.example.ini, run by the setup;
                     prepare/python/ holds Python for it when --python names the python.org
@@ -26,7 +27,8 @@ start deception.exe or the desktop shortcut it offers.
 
 --debug packages for chasing a bug on someone's PC instead: the exes keep their debug info and
 diagnose/ holds the glitch kit (packaging/diagnose: start.bat arms the frame capture,
-optimization toggles and reload trigger). Its zip is <release>-debug.zip. A plain --zip also writes
+optimization toggles and reload trigger). Its zip is <release>-debug.zip. A plain --zip writes
+<release>-windows-x64.zip (system and CPU in the name, as RecompLauncher picks the download by them) and
 <release>-symbols.zip with the unstripped exes, which resolve the exe+0x... offsets of a player's
 deception.log (llvm-addr2line -fe deception.exe 0x140000000+offset).
 
@@ -289,7 +291,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--out', type=Path, help='the folder to fill (default dist)')
     p.add_argument('--python', type=Path, help='Python to ship with the setup: the python.org embeddable package (folder or .zip), Windows')
-    p.add_argument('--zip', action='store_true', help='also write out/<release>.zip (and <release>-symbols.zip)')
+    p.add_argument('--zip', action='store_true', help='also write out/<release>-windows-x64.zip (and <release>-symbols.zip)')
     p.add_argument('--debug', action='store_true', help='keep debug info in the exes and ship the diagnose/ kit')
     a = p.parse_args()
     bin_dir = Path(os.environ.get('MSYS2_ROOT', r'C:\msys64')) / 'clang64' / 'bin'
@@ -373,6 +375,8 @@ def main():
                                                        debug_note=DEBUG_NOTE if a.debug else '')
                                          .replace('\n', '\r\n').encode())
     ship(PORT / 'LICENSE', 'LICENSE.txt')
+    # At the top of the release, next to the exes, where RecompLauncher reads it.
+    ship(PORT / 'recomplauncher.json', 'recomplauncher.json')
     # The overlay's embedded fonts: their licenses go with them.
     for font_license in sorted((PORT / 'gpu' / 'third_party' / 'fonts').glob('LICENSE-*.txt')):
         ship(font_license, f'licenses/{font_license.name}')
@@ -388,7 +392,7 @@ def main():
 
     if a.zip and LINUX:
         # tar keeps the exec bits a zip would lose.
-        archive = PORT / 'out' / f'{release}-linux{"-debug" if a.debug else ""}.tar.gz'
+        archive = PORT / 'out' / f'{release}-linux{"-debug" if a.debug else "-x64"}.tar.gz'
         with tarfile.open(archive, 'w:gz', compresslevel=9) as t:
             for name in sorted(shipped):
                 t.add(out / name, f'{release}/{name}')
@@ -400,7 +404,7 @@ def main():
                     t.add(PORT / 'out' / exe, exe)
             print(f'{symbols}: {symbols.stat().st_size / 2**20:.0f} MiB (not for players)')
     elif a.zip:
-        archive = PORT / 'out' / f'{release}{"-debug" if a.debug else ""}.zip'
+        archive = PORT / 'out' / f'{release}{"-debug" if a.debug else "-windows-x64"}.zip'
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             for name in sorted(shipped):
                 z.write(out / name, f'{release}/{name}')
