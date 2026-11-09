@@ -2,7 +2,7 @@
 
 # Deception IV: The Nightmare Princess (PS4) - Recompiled to PC
 
-An (obviously) unofficial port of the PS4 version of <b>Deception IV: The Nightmare Princess</b>, KOEI TECMO's trap-laying action game, to Windows and Linux.
+An (obviously) unofficial port of the PS4 version of <b>Deception IV: The Nightmare Princess</b>, KOEI TECMO's unique trap-laying action game (and also severely underrated), to Windows and Linux.
 
 The game's own x86-64 code runs directly on the PC: the PS4 system libraries it calls are reimplemented, and its GPU commands are drawn with Vulkan.
 
@@ -13,9 +13,8 @@ This requires you to provide a decrypted dump of your own copy of the game. Only
 ## Features
 
 - **Any window size:** windowed, borderless or fullscreen, at 720p, 900p, 1080p, 1440p, 4K and more. The game renders at its native 1080p and is scaled to the window, with AMD FSR 1 RCAS sharpening.
-- **Native 30 FPS** at the right game speed (see [Frame rate](#frame-rate)).
 - **Update and DLC support** from your own dumps.
-- **Built in skip intro:** (optionally) boots straight to the title menu (NEW GAME / CONTINUE) in about 6 s: the logos, the autosave notice and "Press ANY button" are skipped.
+- **Built in skip intro:** (optionally) fast forwards to the title menu (NEW GAME / CONTINUE) in about 6 s: the logos, the autosave notice and "Press ANY button" are sped up / skipped.
 - **Display settings in the game:** press **F10**, or hold **Select** (View, Back, Share) for two
   seconds, for window mode, resolution, VSync and more.
 - **Keyboard and any gamepad.** DualShock 4 and DualSense work as they are, Xbox-style pads by
@@ -35,7 +34,7 @@ shadPS4 is a general PS4 emulator, and this project builds on its video core. It
 - **Only options that work for this game.** No frame rate unlock that would speed the game up, no 4K or HDR switches it cannot use.
 - **Help when it breaks.** A crash keeps its log and says where it is; a freeze writes what every thread was doing.
 
-What it does not change: the game still runs at its native 30 FPS and renders at 1080p in 16:9, as it does on PS4 and on shadPS4.
+What it does not change: the game still runs at its native 30 FPS (see [Frame rate](#frame-rate)) and renders at 1080p in 16:9, as it does on PS4 and on shadPS4.
 
 ## Requirements
 
