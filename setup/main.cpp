@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <gdiplus.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 
@@ -156,10 +157,11 @@ int run_cli(const std::vector<std::wstring>& args) {
 }
 
 // --- window -------------------------------------------------------------------------------------
-// Drawn in the colours of the game's Display Settings panel (F10; gpu/shim/deception_overlay.cpp
-// PageInk, as they show on screen): a framed dark-teal panel on deep blue, teal rows, and the
-// highlighted cyan for the action that is ready. Install stays disabled until the game folder holds a
-// Deception dump, the update and DLC folders (optional) are usable when named, and a save folder is named.
+// Drawn like the game's dialogs and its Display Settings page (F10; gpu/shim/deception_overlay.cpp):
+// a near-black panel in a gold frame with corner flourishes, the title in Cinzel, text in Josefin
+// Slab (both embedded in setup.rc and loaded for this process only), and the action that is ready on
+// an amber band. Install stays disabled until the game folder holds a Deception dump, the update and
+// DLC folders (optional) are usable when named, and a save folder is named.
 
 enum : int {
     kGameEdit = 101,
@@ -173,19 +175,23 @@ enum : int {
     kPlay,
     kSkipIntro,
 };
+// The fonts in setup.rc (RCDATA), the same as the game's Display Settings page.
+enum : int { kTitleFont = 201, kTextFont = 202 };
 enum : UINT {
     kMsgLog = WM_APP + 1, // lParam: std::wstring* line
     kMsgDone,             // wParam: 1 ok; lParam: std::wstring* exe path or error
 };
 
 namespace color {
-constexpr COLORREF Back = RGB(0x01, 0x0c, 0x1d), Panel = RGB(0x00, 0x24, 0x38), Frame = RGB(0x5f, 0xc8, 0xd8);
-constexpr COLORREF Tab = RGB(0x00, 0x40, 0x57);
-constexpr COLORREF RowTop = RGB(0x00, 0x70, 0x8b), RowBottom = RGB(0x00, 0x4c, 0x65), RowEdge = RGB(0x3a, 0x9c, 0xb0);
-constexpr COLORREF FocusTop = RGB(0x00, 0xcb, 0xff), FocusBottom = RGB(0x00, 0x57, 0x80), FocusEdge = RGB(0xd8, 0xfa, 0xff);
-constexpr COLORREF OffTop = RGB(0x0a, 0x34, 0x44), OffBottom = RGB(0x06, 0x24, 0x30);
-constexpr COLORREF Field = RGB(0x00, 0x16, 0x24), Text = RGB(0xff, 0xff, 0xff), Help = RGB(0xb0, 0xe4, 0xec);
-constexpr COLORREF Dim = RGB(0x5a, 0x86, 0x92), Good = RGB(0x8c, 0xec, 0xf4), Bad = RGB(0xff, 0xb4, 0x78);
+// The game's dialogs, as the Display Settings page draws them (gpu/shim/deception_overlay.cpp
+// PageInk, here in sRGB): a near-black panel in a gold frame, cream text, and the action that is
+// ready on an amber band.
+constexpr COLORREF Back = RGB(0x0b, 0x08, 0x06), Panel = RGB(0x07, 0x04, 0x03), Field = RGB(0x14, 0x0e, 0x0a);
+constexpr COLORREF GoldHi = RGB(0xf0, 0xc0, 0x70), Gold = RGB(0xc0, 0x8a, 0x3c), GoldDim = RGB(0x6e, 0x4a, 0x1e);
+constexpr COLORREF Hair = RGB(0x4a, 0x32, 0x16), BandMid = RGB(0x9a, 0x5a, 0x1c), BandEdge = RGB(0x2c, 0x16, 0x08);
+constexpr COLORREF Text = RGB(0xf5, 0xec, 0xd8), Dim = RGB(0xbc, 0xaa, 0x8a), Off = RGB(0x5e, 0x52, 0x42);
+constexpr COLORREF Title = RGB(0xf2, 0xd4, 0x9c), Help = RGB(0xe8, 0xda, 0xbd);
+constexpr COLORREF Good = RGB(0xe6, 0xc8, 0x7e), Bad = RGB(0xe8, 0x6a, 0x48);
 } // namespace color
 
 // One folder row: its label, the field and Browse, and what the check says about the folder.
@@ -199,8 +205,8 @@ struct Folder {
 
 struct Ui {
     HWND wnd = nullptr, play = nullptr, install = nullptr, exit = nullptr, skip_intro = nullptr;
-    Folder game{L"Game folder", 66}, update{L"Update folder (optional)", 146}, dlc{L"Extra DLC folder (optional)", 226},
-        save{L"Save folder", 306};
+    Folder game{L"GAME FOLDER", 90}, update{L"UPDATE FOLDER (OPTIONAL)", 166}, dlc{L"EXTRA DLC FOLDER (OPTIONAL)", 242},
+        save{L"SAVE FOLDER", 318};
     std::vector<HWND> inputs; // disabled while installing (Play Game too, and until the folder is set up)
     HFONT font = nullptr, bold = nullptr, title = nullptr;
     HBRUSH field = nullptr;
@@ -213,12 +219,15 @@ struct Ui {
 Ui ui;
 
 // Layout in 96-dpi units; the client area is kWidth x kHeight.
-constexpr int kWidth = 640, kHeight = 532;
-constexpr int kRowLeft = 36, kRowRight = 604, kRowHeight = 72, kFieldLeft = 58, kBrowseLeft = 480, kBrowseWidth = 104;
-constexpr int kPanelTop = 40, kPanelBottom = 432, kButtonsTop = 484;
+constexpr int kWidth = 640, kHeight = 570;
+constexpr int kRowLeft = 44, kRowRight = 596, kRowHeight = 66, kFieldLeft = 58, kBrowseLeft = 480, kBrowseWidth = 100;
+constexpr int kPanelTop = 14, kPanelBottom = 448, kButtonsTop = 516;
 
 int px(int v) {
     return MulDiv(v, static_cast<int>(ui.dpi), 96);
+}
+float pxf(float v) {
+    return v * static_cast<float>(ui.dpi) / 96.0f;
 }
 
 RECT rect(int x, int y, int w, int h) {
@@ -233,45 +242,12 @@ std::wstring text_of(HWND h) {
 }
 
 // --- drawing ---
-
-// A trapezoid `skew` narrower on each side at the bottom (the game's rows and tabs), filled with a
-// vertical gradient and outlined.
-void shape(HDC dc, RECT r, int skew, COLORREF top, COLORREF bottom, COLORREF edge, int edge_width = 1) {
-    POINT pts[4] = {{r.left, r.top}, {r.right - 1, r.top}, {r.right - 1 - skew, r.bottom - 1}, {r.left + skew, r.bottom - 1}};
-    HRGN rgn = CreatePolygonRgn(pts, 4, WINDING);
-    SaveDC(dc);
-    SelectClipRgn(dc, rgn);
-    TRIVERTEX v[2] = {
-        {r.left, r.top, static_cast<COLOR16>(GetRValue(top) << 8), static_cast<COLOR16>(GetGValue(top) << 8),
-         static_cast<COLOR16>(GetBValue(top) << 8), 0},
-        {r.right, r.bottom, static_cast<COLOR16>(GetRValue(bottom) << 8), static_cast<COLOR16>(GetGValue(bottom) << 8),
-         static_cast<COLOR16>(GetBValue(bottom) << 8), 0},
-    };
-    GRADIENT_RECT g = {0, 1};
-    GradientFill(dc, v, 2, &g, 1, GRADIENT_FILL_RECT_V);
-    RestoreDC(dc, -1);
-    DeleteObject(rgn);
-    HPEN pen = CreatePen(PS_SOLID, edge_width, edge);
-    HGDIOBJ old_pen = SelectObject(dc, pen), old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    Polygon(dc, pts, 4);
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(pen);
-}
+// Flat fills and text with GDI; the gold lines, curls and the amber band with GDI+, antialiased.
 
 void fill(HDC dc, RECT r, COLORREF c) {
     HBRUSH b = CreateSolidBrush(c);
     FillRect(dc, &r, b);
     DeleteObject(b);
-}
-
-void frame(HDC dc, RECT r, COLORREF c, int width = 1) {
-    HPEN pen = CreatePen(PS_INSIDEFRAME, width, c);
-    HGDIOBJ old_pen = SelectObject(dc, pen), old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    Rectangle(dc, r.left, r.top, r.right, r.bottom);
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(pen);
 }
 
 void text(HDC dc, const std::wstring& s, RECT r, HFONT font, COLORREF c, UINT format) {
@@ -282,47 +258,128 @@ void text(HDC dc, const std::wstring& s, RECT r, HFONT font, COLORREF c, UINT fo
     SelectObject(dc, old);
 }
 
-// The box the edit sits in: a dark field with the rows' edge colour.
-RECT field_box(const Folder& f) {
-    return rect(kFieldLeft, f.y + 36, kBrowseLeft - kFieldLeft - 10, 28);
+Gdiplus::Color gp(COLORREF c, BYTE alpha = 255) {
+    return Gdiplus::Color(alpha, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
-void paint_folder(HDC dc, const Folder& f) {
-    shape(dc, rect(kRowLeft, f.y, kRowRight - kRowLeft, kRowHeight), px(10), color::RowTop, color::RowBottom, color::RowEdge);
-    text(dc, f.label, rect(kFieldLeft, f.y + 8, 240, 24), ui.bold, color::Text, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    text(dc, f.note, rect(kFieldLeft + 240, f.y + 8, kRowRight - 20 - kFieldLeft - 240, 24), ui.font,
-         f.ok ? color::Good : color::Bad, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    RECT box = field_box(f);
-    fill(dc, box, color::Field);
-    frame(dc, box, color::RowEdge);
+// A GDI+ canvas on `dc`, antialiased; destroyed before GDI draws on the DC again.
+struct Canvas {
+    Gdiplus::Graphics g;
+    explicit Canvas(HDC dc) : g(dc) { g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias); }
+    void line(float x0, float y0, float x1, float y1, COLORREF c, float w) {
+        Gdiplus::Pen pen(gp(c), w);
+        g.DrawLine(&pen, x0, y0, x1, y1);
+    }
+    void rect(float x0, float y0, float x1, float y1, COLORREF c, float w) {
+        Gdiplus::Pen pen(gp(c), w);
+        g.DrawRectangle(&pen, x0, y0, x1 - x0, y1 - y0);
+    }
+    void diamond(float x, float y, float r, COLORREF c) {
+        Gdiplus::SolidBrush brush(gp(c));
+        Gdiplus::PointF pts[4] = {{x, y - r}, {x + r, y}, {x, y + r}, {x - r, y}};
+        g.FillPolygon(&brush, pts, 4);
+    }
+    // A thin gold rule with a diamond at each end and one in the middle.
+    void rule(float x0, float x1, float y) {
+        line(x0, y, x1, y, color::Gold, pxf(1.2f));
+        diamond(x0, y, pxf(3.0f), color::Gold);
+        diamond(x1, y, pxf(3.0f), color::Gold);
+        diamond((x0 + x1) * 0.5f, y, pxf(4.5f), color::GoldHi);
+    }
+    // A scrolled flourish in a frame's corner (cx, cy), curling inward along (sx, sy).
+    void flourish(float cx, float cy, float sx, float sy) {
+        const float k = pxf(15.0f), w = pxf(1.4f);
+        auto at = [&](float x, float y) { return Gdiplus::PointF(cx + sx * x * k, cy + sy * y * k); };
+        Gdiplus::Pen hi(gp(color::GoldHi), w), mid(gp(color::Gold), w);
+        g.DrawBezier(&hi, at(0.35f, 0.35f), at(1.6f, 0.2f), at(2.6f, 1.4f), at(1.7f, 1.5f));
+        g.DrawBezier(&hi, at(0.35f, 0.35f), at(0.2f, 1.6f), at(1.4f, 2.6f), at(1.5f, 1.7f));
+        const float r = 0.24f * k;
+        Gdiplus::PointF a = at(1.75f, 1.25f), b = at(1.25f, 1.75f);
+        g.DrawEllipse(&mid, a.X - r, a.Y - r, 2 * r, 2 * r);
+        g.DrawEllipse(&mid, b.X - r, b.Y - r, 2 * r, 2 * r);
+        g.DrawBezier(&mid, at(0.6f, 0.3f), at(1.8f, 0.0f), at(2.6f, 0.0f), at(3.4f, 0.3f));
+        g.DrawBezier(&mid, at(0.3f, 0.6f), at(0.0f, 1.8f), at(0.0f, 2.6f), at(0.3f, 3.4f));
+        const Gdiplus::PointF c = at(0.55f, 0.55f);
+        diamond(c.X, c.Y, 0.32f * k, color::GoldHi);
+    }
+    // The game's dialog frame: a bright gold line, a darker one just within it, a flourish in each corner.
+    void frame(RECT r) {
+        const float x0 = float(r.left), y0 = float(r.top), x1 = float(r.right), y1 = float(r.bottom), in = pxf(5.0f);
+        rect(x0, y0, x1, y1, color::GoldHi, pxf(2.2f));
+        rect(x0 + in, y0 + in, x1 - in, y1 - in, color::GoldDim, pxf(1.0f));
+        flourish(x0, y0, 1, 1);
+        flourish(x1, y0, -1, 1);
+        flourish(x0, y1, 1, -1);
+        flourish(x1, y1, -1, -1);
+    }
+    // The ornament at an end of the amber band: a gold lance pointing at it (dir 1 points right), a
+    // crescent behind its tip and a diamond at its point.
+    void ornament(float tx, float ty, float size, int dir) {
+        const float d = float(dir), w = pxf(1.4f);
+        line(tx - d * size * 1.6f, ty, tx - d * size * 0.35f, ty, color::GoldHi, w);
+        const float cx = tx - d * size * 0.95f, r = size * 0.42f;
+        Gdiplus::Pen pen(gp(color::GoldHi), w);
+        g.DrawArc(&pen, cx - r, ty - r, 2 * r, 2 * r, dir > 0 ? 99.0f : -81.0f, 162.0f);
+        diamond(cx, ty, size * 0.16f, color::GoldHi);
+        diamond(tx - d * size * 0.25f, ty, size * 0.2f, color::GoldHi);
+    }
+    // The chosen answer's band: amber, brightest in the middle, between gold lines.
+    void band(RECT r) {
+        const float x0 = float(r.left), y0 = float(r.top), x1 = float(r.right), y1 = float(r.bottom), mid = (x0 + x1) * 0.5f;
+        Gdiplus::LinearGradientBrush left(Gdiplus::PointF(x0 - 1, y0), Gdiplus::PointF(mid + 1, y0), gp(color::BandEdge),
+                                          gp(color::BandMid));
+        Gdiplus::LinearGradientBrush right(Gdiplus::PointF(mid - 1, y0), Gdiplus::PointF(x1 + 1, y0), gp(color::BandMid),
+                                           gp(color::BandEdge));
+        g.FillRectangle(&left, x0, y0, mid - x0, y1 - y0);
+        g.FillRectangle(&right, mid, y0, x1 - mid, y1 - y0);
+        line(x0, y0, x1, y0, color::Gold, pxf(1.2f));
+        line(x0, y1, x1, y1, color::Gold, pxf(1.2f));
+    }
+};
+
+// The box the edit sits in: a dark field in a dark gold line.
+RECT field_box(const Folder& f) {
+    return rect(kFieldLeft, f.y + 32, kBrowseLeft - kFieldLeft - 10, 28);
 }
 
 void paint(HDC dc) {
     RECT client;
     GetClientRect(ui.wnd, &client);
     fill(dc, client, color::Back);
-    // The panel and its title tab, as the Display Settings page draws them.
-    RECT panel = rect(20, kPanelTop, kWidth - 40, kPanelBottom - kPanelTop);
+    RECT panel = rect(14, kPanelTop, kWidth - 28, kPanelBottom - kPanelTop);
     fill(dc, panel, color::Panel);
-    frame(dc, panel, color::Frame, px(2));
-    RECT tab = rect(kWidth / 2 - 140, 12, 280, 42);
-    shape(dc, tab, px(12), color::Tab, color::Panel, color::Frame, px(2));
-    text(dc, L"DECEPTION SETUP", tab, ui.title, color::Text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     for (const Folder* f : {&ui.game, &ui.update, &ui.dlc, &ui.save})
-        paint_folder(dc, *f);
-    text(dc, ui.status, rect(24, kPanelBottom + 10, kWidth - 48, kButtonsTop - kPanelBottom - 16), ui.font,
-         ui.status_bad ? color::Bad : color::Help, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+        fill(dc, field_box(*f), color::Field);
+    {
+        Canvas c(dc);
+        c.frame(panel);
+        c.rule(pxf(kWidth * 0.28f), pxf(kWidth * 0.72f), pxf(66));
+        for (const Folder* f : {&ui.game, &ui.update, &ui.dlc, &ui.save}) {
+            RECT row = rect(kRowLeft, f->y, kRowRight - kRowLeft, kRowHeight);
+            c.rect(float(row.left), float(row.top), float(row.right), float(row.bottom), color::Hair, pxf(1.0f));
+            RECT box = field_box(*f);
+            c.rect(float(box.left), float(box.top), float(box.right), float(box.bottom), color::GoldDim, pxf(1.0f));
+        }
+        c.rule(pxf(40), pxf(kWidth - 40), pxf(kPanelBottom + 56));
+    }
+    text(dc, L"DECEPTION SETUP", rect(0, 26, kWidth, 34), ui.title, color::Title, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    for (const Folder* f : {&ui.game, &ui.update, &ui.dlc, &ui.save}) {
+        text(dc, f->label, rect(kFieldLeft, f->y + 6, 260, 24), ui.bold, color::Text, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        text(dc, f->note, rect(kFieldLeft + 260, f->y + 6, kRowRight - 16 - kFieldLeft - 260, 24), ui.font,
+             f->ok ? color::Good : color::Bad, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+    text(dc, ui.status, rect(28, kPanelBottom + 8, kWidth - 56, 42), ui.font, ui.status_bad ? color::Bad : color::Help,
+         DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
 }
 
-// Owner-drawn buttons: the rows' teal, the highlighted cyan for the one action that is ready, and a
-// dim teal when disabled.
+// Owner-drawn buttons, as the game's answers: the action that is ready on the amber band between two
+// ornaments, the others in a dark gold outline, and dim text when disabled. Browse is a small
+// outlined box; the intro option a gold check box.
 void draw_button(const DRAWITEMSTRUCT& d) {
     HDC dc = d.hDC;
     RECT r = d.rcItem;
-    fill(dc, r, d.hwndItem == ui.skip_intro ? color::Panel : d.CtlID == kGameBrowse || d.CtlID == kUpdateBrowse || d.CtlID == kDlcBrowse ||
-                                                                 d.CtlID == kSaveBrowse
-                                                             ? color::RowBottom
-                                                             : color::Back);
+    const bool browse = d.CtlID == kGameBrowse || d.CtlID == kUpdateBrowse || d.CtlID == kDlcBrowse || d.CtlID == kSaveBrowse;
+    fill(dc, r, d.hwndItem == ui.skip_intro || browse ? color::Panel : color::Back);
     bool disabled = d.itemState & ODS_DISABLED, pressed = d.itemState & ODS_SELECTED, focus = d.itemState & ODS_FOCUS;
     wchar_t label[128] = {};
     GetWindowTextW(d.hwndItem, label, 128);
@@ -330,30 +387,43 @@ void draw_button(const DRAWITEMSTRUCT& d) {
         RECT box = {r.left + px(2), r.top + (r.bottom - r.top - px(18)) / 2, r.left + px(20), 0};
         box.bottom = box.top + px(18);
         fill(dc, box, color::Field);
-        frame(dc, box, focus ? color::FocusEdge : color::RowEdge, focus ? px(2) : 1);
-        if (ui.skip) {
-            HPEN pen = CreatePen(PS_SOLID, px(2), color::Good);
-            HGDIOBJ old = SelectObject(dc, pen);
-            POINT check[3] = {{box.left + px(4), box.top + px(9)}, {box.left + px(8), box.top + px(13)},
-                              {box.left + px(14), box.top + px(5)}};
-            Polyline(dc, check, 3);
-            SelectObject(dc, old);
-            DeleteObject(pen);
+        {
+            Canvas c(dc);
+            c.rect(float(box.left), float(box.top), float(box.right - 1), float(box.bottom - 1),
+                   focus ? color::GoldHi : color::GoldDim, focus ? pxf(1.8f) : pxf(1.0f));
+            if (ui.skip) {
+                Gdiplus::Pen pen(gp(color::GoldHi), pxf(2.0f));
+                Gdiplus::PointF check[3] = {{float(box.left) + pxf(4), float(box.top) + pxf(9)},
+                                            {float(box.left) + pxf(8), float(box.top) + pxf(13)},
+                                            {float(box.left) + pxf(14), float(box.top) + pxf(4)}};
+                c.g.DrawLines(&pen, check, 3);
+            }
         }
         RECT t = {box.right + px(10), r.top, r.right, r.bottom};
-        text(dc, label, t, ui.font, disabled ? color::Dim : color::Help, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        text(dc, label, t, ui.font, disabled ? color::Off : color::Help, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         return;
     }
-    bool primary = d.hwndItem == (setup::ready(ui.root) && !IsWindowEnabled(ui.install) ? ui.play : ui.install);
-    COLORREF top = disabled ? color::OffTop : primary ? color::FocusTop : color::RowTop;
-    COLORREF bottom = disabled ? color::OffBottom : primary ? color::FocusBottom : color::RowBottom;
-    if (pressed)
-        std::swap(top, bottom);
-    bool browse = d.CtlID == kGameBrowse || d.CtlID == kUpdateBrowse || d.CtlID == kDlcBrowse || d.CtlID == kSaveBrowse;
-    int skew = browse ? 0 : (r.bottom - r.top) / 4; // Browse sits on a row's gradient: no corners to fill
-    shape(dc, r, skew, top, bottom, focus ? color::FocusEdge : disabled ? color::Dim : color::RowEdge,
-          focus ? px(2) : 1);
-    text(dc, label, r, ui.bold, disabled ? color::Dim : color::Text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    const bool primary = !browse && !disabled && d.hwndItem == (setup::ready(ui.root) && !IsWindowEnabled(ui.install) ? ui.play : ui.install);
+    {
+        Canvas c(dc);
+        const float x0 = float(r.left), y0 = float(r.top), x1 = float(r.right - 1), y1 = float(r.bottom - 1);
+        if (primary) {
+            const float orn = (y1 - y0) * 0.5f;
+            RECT band = {r.left + int(orn * 1.2f), r.top + px(2), r.right - int(orn * 1.2f), r.bottom - px(2)};
+            c.band(band);
+            c.ornament(float(band.left) + orn * 0.2f, (y0 + y1) * 0.5f, orn, 1);
+            c.ornament(float(band.right) - orn * 0.2f, (y0 + y1) * 0.5f, orn, -1);
+        } else {
+            const float in = browse ? 0.0f : pxf(10.0f);
+            c.rect(x0 + in, y0 + pxf(2), x1 - in, y1 - pxf(2), focus ? color::Gold : browse ? color::GoldDim : color::Hair,
+                   focus ? pxf(1.6f) : pxf(1.0f));
+        }
+        if (focus && primary) c.rect(x0 + pxf(1), y0 + pxf(1), x1 - pxf(1), y1 - pxf(1), color::GoldDim, pxf(1.0f));
+    }
+    RECT t = r;
+    if (pressed) OffsetRect(&t, px(1), px(1));
+    text(dc, label, t, browse ? ui.font : ui.bold, disabled ? color::Off : primary || focus ? color::Text : color::Dim,
+         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
 // --- state ---
@@ -361,7 +431,7 @@ void draw_button(const DRAWITEMSTRUCT& d) {
 void set_status(std::wstring s, bool bad = false) {
     ui.status = std::move(s);
     ui.status_bad = bad;
-    RECT r = rect(0, kPanelBottom + 4, kWidth, kButtonsTop - kPanelBottom - 6);
+    RECT r = rect(0, kPanelBottom + 4, kWidth, 48);
     InvalidateRect(ui.wnd, &r, FALSE);
 }
 
@@ -534,7 +604,7 @@ void add_folder(Folder& f, int edit_id, int browse_id) {
     RECT r = {box.left + px(7), box.top + (box.bottom - box.top - h) / 2, box.right - px(7), 0};
     r.bottom = r.top + h;
     f.edit = add(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, r, edit_id);
-    f.browse = add(WC_BUTTONW, L"Browse...", WS_TABSTOP | BS_OWNERDRAW, rect(kBrowseLeft, f.y + 35, kBrowseWidth, 30),
+    f.browse = add(WC_BUTTONW, L"Browse...", WS_TABSTOP | BS_OWNERDRAW, rect(kBrowseLeft, f.y + 31, kBrowseWidth, 30),
                    browse_id);
 }
 
@@ -545,10 +615,15 @@ void create_controls() {
     add_folder(ui.dlc, kDlcEdit, kDlcBrowse);
     add_folder(ui.save, kSaveEdit, kSaveBrowse);
     ui.skip_intro = add(WC_BUTTONW, L"Skip the intro to the title menu (skip_intro=0 in settings.ini brings it back)",
-                        WS_TABSTOP | BS_OWNERDRAW, rect(kRowLeft + 4, 390, kRowRight - kRowLeft - 8, 30), kSkipIntro);
-    ui.play = add(WC_BUTTONW, L"Play Game", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 3 * 128 + 8, kButtonsTop, 120, 36), kPlay);
-    ui.install = add(WC_BUTTONW, L"Install", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 2 * 128 + 8, kButtonsTop, 120, 36), IDOK);
-    ui.exit = add(WC_BUTTONW, L"Exit", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 128 + 8, kButtonsTop, 120, 36), IDCANCEL);
+                        WS_TABSTOP | BS_OWNERDRAW, rect(kRowLeft + 4, 398, kRowRight - kRowLeft - 8, 30), kSkipIntro);
+    // Play Game, Install and Exit, centred under the rule.
+    constexpr int kButtonWidth = 156, kButtonGap = 12, kButtonsLeft = (kWidth - 3 * kButtonWidth - 2 * kButtonGap) / 2;
+    ui.play = add(WC_BUTTONW, L"Play Game", WS_TABSTOP | BS_OWNERDRAW,
+                  rect(kButtonsLeft, kButtonsTop, kButtonWidth, 36), kPlay);
+    ui.install = add(WC_BUTTONW, L"Install", WS_TABSTOP | BS_OWNERDRAW,
+                     rect(kButtonsLeft + kButtonWidth + kButtonGap, kButtonsTop, kButtonWidth, 36), IDOK);
+    ui.exit = add(WC_BUTTONW, L"Exit", WS_TABSTOP | BS_OWNERDRAW,
+                  rect(kButtonsLeft + 2 * (kButtonWidth + kButtonGap), kButtonsTop, kButtonWidth, 36), IDCANCEL);
     ui.inputs = {ui.game.edit, ui.game.browse, ui.update.edit, ui.update.browse, ui.dlc.edit, ui.dlc.browse, ui.save.edit, ui.save.browse,
                  ui.skip_intro, ui.exit};
 
@@ -663,12 +738,23 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(wnd, msg, wp, lp);
 }
 
-HFONT make_font(const LOGFONTW& base, int height, int weight) {
+HFONT make_font(const LOGFONTW& base, const wchar_t* face, int height, int weight) {
     LOGFONTW lf = base;
     lf.lfHeight = -px(height);
     lf.lfWeight = weight;
     lf.lfQuality = CLEARTYPE_QUALITY;
+    if (face)
+        lstrcpynW(lf.lfFaceName, face, LF_FACESIZE);
     return CreateFontIndirectW(&lf);
+}
+
+// Makes a TTF in setup.rc (RCDATA `id`) usable by this process only; false when it is missing.
+bool load_font(int id) {
+    HRSRC res = FindResourceW(nullptr, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+    HGLOBAL data = res ? LoadResource(nullptr, res) : nullptr;
+    void* bytes = data ? LockResource(data) : nullptr;
+    DWORD count = 0;
+    return bytes && AddFontMemResourceEx(bytes, SizeofResource(nullptr, res), nullptr, &count) && count;
 }
 
 int run_window(HINSTANCE inst) {
@@ -679,9 +765,15 @@ int run_window(HINSTANCE inst) {
     NONCLIENTMETRICSW ncm = {};
     ncm.cbSize = sizeof(ncm);
     SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0, ui.dpi);
-    ui.font = make_font(ncm.lfMessageFont, 15, FW_NORMAL);
-    ui.bold = make_font(ncm.lfMessageFont, 15, FW_SEMIBOLD);
-    ui.title = make_font(ncm.lfMessageFont, 22, FW_SEMIBOLD);
+    // Cinzel Bold and Josefin Slab SemiBold, as the game's pages; the system's font if they are missing.
+    const bool title_font = load_font(kTitleFont), text_font = load_font(kTextFont);
+    const wchar_t* text_face = text_font ? L"Josefin Slab SemiBold" : nullptr;
+    ui.font = make_font(ncm.lfMessageFont, text_face, 15, FW_NORMAL);
+    ui.bold = make_font(ncm.lfMessageFont, text_face, 16, text_font ? FW_NORMAL : FW_SEMIBOLD);
+    ui.title = make_font(ncm.lfMessageFont, title_font ? L"Cinzel" : nullptr, 28, FW_BOLD);
+    Gdiplus::GdiplusStartupInput gdiplus_input;
+    ULONG_PTR gdiplus = 0;
+    Gdiplus::GdiplusStartup(&gdiplus, &gdiplus_input, nullptr);
     ui.field = CreateSolidBrush(color::Field);
 
     WNDCLASSEXW wc = {sizeof(wc)};
@@ -697,7 +789,7 @@ int run_window(HINSTANCE inst) {
     AdjustWindowRectExForDpi(&r, style, FALSE, 0, ui.dpi);
     ui.wnd = CreateWindowExW(0, wc.lpszClassName, kTitle, style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left,
                              r.bottom - r.top, nullptr, nullptr, inst, nullptr);
-    // A dark title bar in the panel's background colour (Windows 11; older versions ignore it).
+    // A dark title bar in the window's background colour (Windows 11; older versions ignore it).
     BOOL dark = TRUE;
     DwmSetWindowAttribute(ui.wnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
     COLORREF caption = color::Back;
@@ -717,6 +809,7 @@ int run_window(HINSTANCE inst) {
     DeleteObject(ui.bold);
     DeleteObject(ui.title);
     DeleteObject(ui.field);
+    Gdiplus::GdiplusShutdown(gdiplus);
     return 0;
 }
 

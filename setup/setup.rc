@@ -1,3 +1,5 @@
 #include <winuser.h>
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "setup.manifest"
 1 ICON "../res/deception.ico"
+201 RCDATA "../gpu/third_party/fonts/Cinzel-Bold.ttf"
+202 RCDATA "../gpu/third_party/fonts/JosefinSlab-SemiBold.ttf"

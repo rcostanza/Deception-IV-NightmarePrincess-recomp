@@ -154,7 +154,9 @@ Trophies come from the dump's `sce_sys/trophy/trophy00.trp` (35); unlocks are ke
 
 ## Release folder and setup
 
-`deception-setup.exe` (`setup/`) runs `prepare/run.py prepare` into `game/` beside it, rewrites the
+`deception-setup.exe` (`setup/`) is drawn like the game's dialogs too (GDI text in the same two
+fonts, embedded in `setup/setup.rc` and loaded for the process only; GDI+ for the gold frame and the
+amber band of the action that is ready). It runs `prepare/run.py prepare` into `game/` beside it, rewrites the
 game's instructions for this CPU if needed, writes `settings.ini` from the template when there is
 none, sets its `skip_intro` line from the window's checkbox, and writes `paths.ini` with the game and
 save folders and, when chosen, `update=` and `dlc=`. Nothing is written outside the release folder

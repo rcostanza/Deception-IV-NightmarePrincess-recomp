@@ -204,7 +204,10 @@ if (WIN32)
     add_executable(deception-setup WIN32 ../setup/main.cpp ../setup/setup.cpp ../setup/setup.rc)
     target_compile_definitions(deception-setup PRIVATE UNICODE _UNICODE)
     target_link_options(deception-setup PRIVATE -municode -static)
-    target_link_libraries(deception-setup PRIVATE comctl32 ole32 shell32 uuid gdi32 msimg32 dwmapi)
+    target_link_libraries(deception-setup PRIVATE comctl32 ole32 shell32 uuid gdi32 msimg32 dwmapi gdiplus)
+    set_property(SOURCE ../setup/setup.rc APPEND PROPERTY OBJECT_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/Cinzel-Bold.ttf
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/JosefinSlab-SemiBold.ttf)
 else()
     # Not PIE: host heap objects handed to the guest stay in the brk heap, below 1 TiB (loader.c main).
     set_target_properties(deception PROPERTIES POSITION_INDEPENDENT_CODE OFF)
