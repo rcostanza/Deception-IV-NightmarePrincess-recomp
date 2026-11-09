@@ -106,15 +106,16 @@ file(GLOB HLE_LIBRARIES CONFIGURE_DEPENDS
 # FFmpeg: the minimal static build of tools/build_ffmpeg.sh (H.264, AAC and PNG decoders, the MP4
 # demuxer, the file protocol, swscale, swresample), which build.sh makes in out/ffmpeg and passes as DECEPTION_FFMPEG_DIR.
 # Linked with its private libraries (zlib, and bcrypt or libm/pthread), as pkg-config --static lists.
+# --define-prefix takes the prefix from the .pc location: a cached build may come from another checkout path.
 set(DECEPTION_FFMPEG_DIR "" CACHE PATH "Prefix of the minimal FFmpeg (tools/build_ffmpeg.sh)")
 if (NOT EXISTS "${DECEPTION_FFMPEG_DIR}/lib/pkgconfig/libavformat.pc")
     message(FATAL_ERROR "DECEPTION_FFMPEG_DIR must name the prefix tools/build_ffmpeg.sh built (build.sh does it)")
 endif()
 set(ENV{PKG_CONFIG_PATH} "${DECEPTION_FFMPEG_DIR}/lib/pkgconfig")
 set(DECEPTION_FFMPEG_MODULES libavformat libavcodec libswscale libswresample libavutil)
-execute_process(COMMAND ${PKG_CONFIG_EXECUTABLE} --static --libs ${DECEPTION_FFMPEG_MODULES}
+execute_process(COMMAND ${PKG_CONFIG_EXECUTABLE} --define-prefix --static --libs ${DECEPTION_FFMPEG_MODULES}
     OUTPUT_VARIABLE DECEPTION_FFMPEG_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-execute_process(COMMAND ${PKG_CONFIG_EXECUTABLE} --cflags-only-I ${DECEPTION_FFMPEG_MODULES}
+execute_process(COMMAND ${PKG_CONFIG_EXECUTABLE} --define-prefix --cflags-only-I ${DECEPTION_FFMPEG_MODULES}
     OUTPUT_VARIABLE DECEPTION_FFMPEG_CFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
 unset(ENV{PKG_CONFIG_PATH})
 separate_arguments(DECEPTION_FFMPEG_LIBS NATIVE_COMMAND "${DECEPTION_FFMPEG_LIBS}")
