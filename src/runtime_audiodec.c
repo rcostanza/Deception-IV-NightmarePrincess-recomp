@@ -4,12 +4,13 @@
  *
  *   sceAudiodecCreateDecoder(ctrl, codecType): ctrl {param*, bsiInfo*, auInfo*, pcmItem*}.
  *     ATRAC9 param {u32 size, s32 wordSize, u8 config[4]}; the 36-byte bsiInfo receives
- *     {size, sampling rate, channels, bit rate, frames per superframe, superframe bytes, frame
- *     samples, encoder delay, 0}. The handle is >= 0.
- *   sceAudiodecDecode(handle, ctrl): one access unit (an ATRAC9 superframe) from auInfo
+ *     {size, channels, bit rate, sampling rate, superframe bytes, frames per superframe, frame
+ *     samples, 0, 0} (Deception's stream code reads channels, bit rate and frames per superframe
+ *     from there). The handle is >= 0.
+ *   sceAudiodecDecode(handle, ctrl): one access unit (an ATRAC9 superframe, padding included) from auInfo
  *     {u32 size, void *addr, u32 bytes} into pcmItem {u32 size, void *addr, u32 bytes}; bytes
- *     become the bytes consumed and written. wordSize 0 writes 16-bit samples, otherwise 32-bit
- *     floats, interleaved. */
+ *     become the bytes consumed and written. wordSize 2 writes 32-bit float samples, otherwise
+ *     16-bit (Deception asks for 1), interleaved. */
 #include "runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +37,7 @@ typedef struct {
     Atrac9CodecInfo info;
     unsigned char config[4];
     short *pcm; /* one superframe */
+    size_t pending, taken; /* samples of it decoded, and handed out */
 } Decoder;
 static Decoder decoders[MAX_DECODERS];
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -60,20 +62,21 @@ static ABI int32_t create_decoder(const Ctrl *ctrl, uint32_t type) {
     if (id<0) { pthread_mutex_unlock(&lock); Atrac9ReleaseHandle(h); return AUDIODEC_ERROR_INVALID_HANDLE; }
     Decoder *d=&decoders[id];
     memset(d,0,sizeof(*d));
-    d->used=1; d->at9=h; d->float_out=word!=0; memcpy(d->config,config,4);
+    d->used=1; d->at9=h; d->float_out=word==2; memcpy(d->config,config,4);
     Atrac9GetCodecInfo(h,&d->info);
     d->pcm=malloc((size_t)d->info.framesInSuperframe*d->info.frameSamples*d->info.channels*sizeof(short));
     pthread_mutex_unlock(&lock);
     if (ctrl->bsi) {
         uint32_t *bsi=ctrl->bsi, bsi_size=bsi[0];
         const uint32_t superframe_samples=(uint32_t)(d->info.framesInSuperframe*d->info.frameSamples);
-        const uint32_t values[9]={bsi_size,(uint32_t)d->info.samplingRate,(uint32_t)d->info.channels,
+        const uint32_t values[9]={bsi_size,(uint32_t)d->info.channels,
             superframe_samples ? (uint32_t)((uint64_t)d->info.superframeSize*8*d->info.samplingRate/superframe_samples) : 0,
-            (uint32_t)d->info.framesInSuperframe,(uint32_t)d->info.superframeSize,(uint32_t)d->info.frameSamples,0,0};
+            (uint32_t)d->info.samplingRate,(uint32_t)d->info.superframeSize,(uint32_t)d->info.framesInSuperframe,
+            (uint32_t)d->info.frameSamples,0,0};
         memcpy(bsi+1,values+1,(bsi_size>=36 ? 36 : bsi_size>4 ? bsi_size : 4)-4);
     }
-    if (runtime_verbose()) printf("Runtime: Audiodec ATRAC9 decoder %d: %d Hz, %d channels, %d-byte superframes, %s output\n",
-                                  id,d->info.samplingRate,d->info.channels,d->info.superframeSize,d->float_out ? "float" : "16-bit");
+    if (runtime_verbose()) printf("Runtime: Audiodec ATRAC9 decoder %d: %d Hz, %d channels, %d-byte superframes, %s output (wordSize %d)\n",
+                                  id,d->info.samplingRate,d->info.channels,d->info.superframeSize,d->float_out ? "float" : "16-bit",word);
     return id;
 }
 static Decoder *get(int32_t handle) {
@@ -92,24 +95,46 @@ static ABI int32_t decode(int32_t handle, const Ctrl *ctrl) {
     if (!ctrl || !ctrl->au || !ctrl->pcm) return AUDIODEC_ERROR_INVALID_POINTER;
     Item *au=ctrl->au, *pcm=ctrl->pcm;
     if (!au->addr || !pcm->addr || !d->pcm) return AUDIODEC_ERROR_INVALID_POINTER;
-    const int frames=d->info.framesInSuperframe, frame_samples=d->info.frameSamples*d->info.channels;
-    const uint32_t sample_bytes=d->float_out ? 4 : 2;
-    if (au->bytes<(uint32_t)d->info.superframeSize) return AUDIODEC_ERROR_INVALID_SIZE;
-    if (pcm->bytes<(uint32_t)(frames*frame_samples)*sample_bytes) return AUDIODEC_ERROR_INVALID_SIZE;
-    const unsigned char *in=au->addr;
+    /* A superframe is decoded when the last one has been handed out: its frames vary in size and it
+     * is padded to its fixed size, so all of it is consumed. The game's output buffer can have less
+     * room than a superframe decodes to: it gets what fits (whole sample frames) and the rest comes
+     * with the next calls, which consume no input. */
+    const int frames=d->info.framesInSuperframe ? d->info.framesInSuperframe : 1;
+    const size_t frame_samples=(size_t)d->info.frameSamples*d->info.channels;
+    const uint32_t sample_bytes=d->float_out ? 4 : 2, superframe=(uint32_t)d->info.superframeSize;
     uint32_t consumed=0;
-    for (int f=0;f<frames;++f) {
-        int used=0;
-        if (Atrac9Decode(d->at9,in+consumed,d->pcm+(size_t)f*frame_samples,&used)) return AUDIODEC_ERROR_DECODE;
-        consumed+=(uint32_t)used;
+    if (d->taken>=d->pending) {
+        if (au->bytes<superframe) {
+            printf("Runtime: Audiodec decode refused: au %u bytes; a superframe is %u bytes\n",au->bytes,superframe);
+            return AUDIODEC_ERROR_INVALID_SIZE;
+        }
+        const uint8_t *in=au->addr;
+        uint32_t used_total=0;
+        for (int f=0;f<frames;++f) {
+            int used=0;
+            if (Atrac9Decode(d->at9,in+used_total,d->pcm+f*frame_samples,&used)) {
+                if (getenv("DECEPTION_AUDIODEC_TRACE")) printf("Audiodec: %d: frame %d of the superframe at %p failed\n",handle,f,au->addr);
+                return AUDIODEC_ERROR_DECODE;
+            }
+            used_total+=(uint32_t)used;
+        }
+        consumed=superframe;
+        d->pending=frames*frame_samples; d->taken=0;
     }
-    const size_t samples=(size_t)frames*frame_samples;
+    const size_t channels=(size_t)(d->info.channels ? d->info.channels : 1);
+    size_t n=pcm->bytes/sample_bytes/channels*channels;
+    if (n>d->pending-d->taken) n=d->pending-d->taken;
+    const short *src=d->pcm+d->taken;
     if (d->float_out) {
         float *out=pcm->addr;
-        for (size_t i=0;i<samples;++i) out[i]=(float)d->pcm[i]*(1.0f/32768.0f);
-    } else memcpy(pcm->addr,d->pcm,samples*2);
+        for (size_t i=0;i<n;++i) out[i]=(float)src[i]*(1.0f/32768.0f);
+    } else memcpy(pcm->addr,src,n*2);
+    d->taken+=n;
+    static int calls;
+    if (getenv("DECEPTION_AUDIODEC_TRACE") && calls++<60)
+        printf("Audiodec: %d: au %u bytes, room %u bytes -> consumed %u, wrote %zu\n",handle,au->bytes,pcm->bytes,consumed,n*sample_bytes);
     au->bytes=consumed;
-    pcm->bytes=(uint32_t)(samples*sample_bytes);
+    pcm->bytes=(uint32_t)(n*sample_bytes);
     return 0;
 }
 /* sceAudiodecClearContext(handle): the decoder starts over, as after creation. */
@@ -117,6 +142,7 @@ static ABI int32_t clear_context(int32_t handle) {
     Decoder *d=get(handle);
     if (!d) return AUDIODEC_ERROR_INVALID_HANDLE;
     Atrac9ReleaseHandle(d->at9);
+    d->pending=d->taken=0;
     d->at9=Atrac9GetHandle();
     return d->at9 && !Atrac9InitDecoder(d->at9,d->config) ? 0 : AUDIODEC_ERROR_INVALID_PARAM;
 }
