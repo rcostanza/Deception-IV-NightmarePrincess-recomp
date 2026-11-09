@@ -118,8 +118,9 @@ execute_process(COMMAND ${PKG_CONFIG_EXECUTABLE} --cflags-only-I ${DECEPTION_FFM
     OUTPUT_VARIABLE DECEPTION_FFMPEG_CFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
 unset(ENV{PKG_CONFIG_PATH})
 separate_arguments(DECEPTION_FFMPEG_LIBS NATIVE_COMMAND "${DECEPTION_FFMPEG_LIBS}")
-string(REGEX REPLACE "-I" "" DECEPTION_FFMPEG_CFLAGS "${DECEPTION_FFMPEG_CFLAGS}")
 separate_arguments(DECEPTION_FFMPEG_CFLAGS NATIVE_COMMAND "${DECEPTION_FFMPEG_CFLAGS}")
+# Strip only the leading -I of each flag: the path itself may contain "-I" (a "Deception-IV" checkout).
+list(TRANSFORM DECEPTION_FFMPEG_CFLAGS REPLACE "^-I" "")
 add_library(deception_ffmpeg INTERFACE)
 target_include_directories(deception_ffmpeg SYSTEM INTERFACE ${DECEPTION_FFMPEG_CFLAGS})
 target_link_libraries(deception_ffmpeg INTERFACE ${DECEPTION_FFMPEG_LIBS})
