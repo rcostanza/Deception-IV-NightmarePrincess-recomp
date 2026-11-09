@@ -19,7 +19,7 @@ options=(
     --enable-decoder=h264,aac,png --enable-parser=h264,aac,png --enable-demuxer=mov --enable-protocol=file
     --enable-swscale --enable-swresample
 )
-stamp="$version ${options[*]} ${CC:-clang}"
+stamp="$version ${options[*]} ${CC:-clang} relocatable"
 if [[ -f $prefix/.stamp && $(<"$prefix/.stamp") == "$stamp" ]]; then exit 0; fi
 
 command -v nasm >/dev/null || echo 'FFmpeg: no nasm, building without the x86 assembly (slower decoding).' >&2
@@ -49,6 +49,9 @@ echo "FFmpeg $version: configuring the minimal build (log: $work/build.log)"
     make -j"$(nproc 2>/dev/null || echo 4)"
     make install
 ) > "$work/build.log" 2>&1 || { tail -30 "$work/build.log" >&2; echo "FFmpeg build failed (log: $work/build.log)" >&2; exit 1; }
+# FFmpeg writes libdir and includedir as absolute paths; make them ${prefix}-relative so that
+# pkg-config --define-prefix (gpu/CMakeLists.txt) finds a prefix that was moved or restored from a cache.
+sed -i -e 's|^libdir=.*|libdir=${prefix}/lib|' -e 's|^includedir=.*|includedir=${prefix}/include|' "$prefix"/lib/pkgconfig/*.pc
 echo "$stamp" > "$prefix/.stamp"
 rm -rf "$work"
 echo "FFmpeg $version: built into $prefix"
