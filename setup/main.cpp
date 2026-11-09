@@ -10,7 +10,7 @@
 //
 //     deception-setup.exe --game <dump or eboot.bin> [--update <folder>|--no-update] [--save <folder>] [--copy-saves]
 //                           [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]
-//                           [--shortcut <folder>|desktop]
+//                           [--shortcut <folder>|desktop] [--progress]
 
 #include "setup.h"
 
@@ -82,7 +82,7 @@ constexpr wchar_t kUsage[] =
     L"usage: deception-setup.exe --game <dump or eboot.bin> [--update <folder>|--no-update]\n"
     L"                             [--save <folder>] [--copy-saves]\n"
     L"                             [--dlc <folder>|--no-dlc] [--skip-intro|--play-intro]\n"
-    L"                             [--shortcut <folder>|desktop]\n"
+    L"                             [--shortcut <folder>|desktop] [--progress]\n"
     L"  --game        the decrypted game dump (eboot.bin, sce_module, sce_sys, FILE_PS4); only ever read\n"
     L"  --update      its decrypted update (patch), laid over the game (default: the one paths.ini\n"
     L"                names, else <game>-patch next to it, as shadPS4 keeps it); --no-update runs without\n"
@@ -94,12 +94,13 @@ constexpr wchar_t kUsage[] =
     L"                skip the start-up logos and notices, or show them again\n"
     L"                (settings.ini skip_intro; default: leave it as it is)\n"
     L"  --shortcut    also write the game's shortcut into this folder, or onto the Desktop\n"
+    L"  --progress    also print each step as \"progress <0 to 1> <step>\" (RecompLauncher)\n"
     L"Sets up the folder this exe is in. With no arguments, opens the setup window.";
 
 int run_cli(const std::vector<std::wstring>& args) {
     Console con;
     std::wstring game, save, shortcut, dlc, update;
-    bool copy_saves = false, no_dlc = false, no_update = false;
+    bool copy_saves = false, no_dlc = false, no_update = false, progress = false;
     std::optional<bool> skip_intro;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::wstring& a = args[i];
@@ -113,6 +114,8 @@ int run_cli(const std::vector<std::wstring>& args) {
             *value = args[++i];
         } else if (a == L"--copy-saves") {
             copy_saves = true;
+        } else if (a == L"--progress") {
+            progress = true;
         } else if (a == L"--skip-intro" || a == L"--play-intro") {
             skip_intro = a == L"--skip-intro";
         } else if (a == L"--no-dlc") {
@@ -142,6 +145,8 @@ int run_cli(const std::vector<std::wstring>& args) {
         if (copy_saves)
             opt.copy_saves_from = saves_to_move(opt.root, opt.save);
         opt.skip_intro = skip_intro;
+        if (progress)
+            opt.progress = [&](double done, const std::wstring& what) { con.out(setup::progress_line(done, what)); };
         fs::path exe = setup::install(opt, [&](const std::wstring& line) { con.out(line); });
         if (!shortcut.empty()) {
             fs::path lnk = (shortcut == L"desktop" ? setup::desktop_folder() : fs::path(shortcut)) / setup::kShortcutName;

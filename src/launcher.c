@@ -327,6 +327,10 @@ int launch_from_paths_ini(int *argc, char ***argv) {
     /* A file manager, menu entry or Steam gives no terminal; --console keeps the output where it is. */
     unattended = !isatty(STDOUT_FILENO) && !isatty(STDERR_FILENO);
 #endif
+    /* RecompLauncher (it sets RECOMPLAUNCHER=1) reads the log folder's deception.log after a crash,
+     * whatever it does with the standard handles. */
+    const char *recomplauncher = getenv("RECOMPLAUNCHER");
+    if (recomplauncher && recomplauncher[0]) unattended = 1;
     if (!find_exe_dir()) {
         complain("Cannot find the folder of deception.");
         return 1;

@@ -592,11 +592,22 @@ bool has_saves(const fs::path& save) {
     return fs::is_directory(data, ec) && !fs::is_empty(data, ec);
 }
 
+std::wstring progress_line(double done, const std::wstring& what) {
+    wchar_t number[16];
+    swprintf(number, std::size(number), L"%.2f", done);
+    return L"progress " + std::wstring(number) + L" " + what;
+}
+
 fs::path install(const Options& opt, const Log& log) {
     fs::path root = clean(opt.root), game = game_folder(opt.game), save = clean(opt.save);
     fs::path dlc = opt.dlc.empty() ? fs::path() : clean(opt.dlc);
     fs::path update = opt.update.empty() ? fs::path() : game_folder(opt.update);
     fs::path prepare = root / L"prepare", image = root / L"game", exe = root / kGameExe;
+    auto step = [&](double done, const wchar_t* what) {
+        if (opt.progress)
+            opt.progress(done, what);
+    };
+    step(0, L"Checking your dump");
     if (inside(save, game))
         fail(L"Choose a save folder outside the game folder. Setup never writes into the game folder.");
     if (inside(root, game) || inside(game, root))
@@ -625,6 +636,7 @@ fs::path install(const Options& opt, const Log& log) {
             fail(text(f) + L" is missing." + kIncomplete);
     std::vector<std::wstring> python = python_command(prepare);
 
+    step(0.1, L"Preparing the game from your dump");
     log(L"Preparing the game from " + text(game));
     fs::remove(image / L"release.txt", ec); // the image is this release's only once it is complete
     std::vector<std::wstring> command = python;
@@ -642,6 +654,7 @@ fs::path install(const Options& opt, const Log& log) {
 
     // On a CPU without some instruction sets the game uses, the sites that use them are rewritten
     // (run.py's play does this at every start; here once).
+    step(0.8, L"Checking this PC's CPU");
     std::wstring cpu;
     unsigned long code = run({text(exe), L"--cpu-features"}, root, log, &cpu);
     if (code == 20)
@@ -661,6 +674,7 @@ fs::path install(const Options& opt, const Log& log) {
     write_text(image / L"release.txt", read_text(root / L"release.txt"));
     log(L"prepared " + text(image));
 
+    step(0.9, L"Writing the settings and folders");
     fs::path settings = root / L"settings.ini";
     if (!fs::exists(settings, ec)) {
         if (!fs::copy_file(prepare / L"settings.example.ini", settings, ec))
@@ -697,6 +711,7 @@ fs::path install(const Options& opt, const Log& log) {
     log(L"wrote    paths.ini (game " + text(game) + (update.empty() ? L"" : L", update " + text(update)) +
         L", save " + text(save) +
         (dlc.empty() ? L"" : L", dlc " + text(dlc)) + L")");
+    step(1, L"Ready to play");
     return exe;
 }
 

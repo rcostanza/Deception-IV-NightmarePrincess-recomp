@@ -27,6 +27,8 @@ struct Options {
     std::optional<std::filesystem::path> copy_saves_from; // the old save folder, whose saves go to `save`
     std::optional<bool> skip_intro; // settings.ini skip_intro to write; unset keeps what is there
     std::filesystem::path dlc; // optional: one more folder of DLC (e.g. shadPS4's addcont); empty for none
+    // optional: told each step as it starts (0 to 1, and what it does); RecompLauncher's progress lines
+    std::function<void(double, const std::wstring&)> progress;
 };
 
 // The folders a release folder's paths.ini names.
@@ -84,6 +86,9 @@ bool has_saves(const std::filesystem::path& save);
 // else the release folder's; false when unset.
 bool skip_intro(const std::filesystem::path& root, const std::filesystem::path& save);
 bool same_path(const std::filesystem::path& a, const std::filesystem::path& b);
+
+// "progress 0.40 <what>": a step as RecompLauncher's setup screen reads it (--progress).
+std::wstring progress_line(double done, const std::wstring& what);
 
 // Sets up opt.root, reporting each step through `log`. Throws Error. Returns the game exe's path.
 std::filesystem::path install(const Options& opt, const Log& log);
