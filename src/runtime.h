@@ -122,9 +122,9 @@ void runtime_kernel_set_neo_mode(int enabled);
 /* 1 in PS4 Pro mode: set before the guest runs, so the direct memory pool can size itself from it. */
 int runtime_kernel_neo_mode(void);
 /* settings.ini skip_intro (runtime_intro.c): started before the game's code with the game folder;
- * told of reads of FILE_PS4/archive00.lnk; asks the pad for Cross while the notice is up. */
+ * told of reads under /app0/FILE_PS4; asks the pad for Cross while it confirms screens. */
 void runtime_intro_start(const char *app0);
-void runtime_intro_archive_read(uint64_t offset, uint64_t size);
+void runtime_intro_archive_read(const char *guest_path, uint64_t offset, uint64_t size);
 int runtime_intro_cross(void);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
@@ -165,6 +165,7 @@ uintptr_t runtime_rtc_resolve(const char *name);
 uintptr_t runtime_json_resolve(const char *name);
 uintptr_t runtime_fiber_resolve(const char *name);
 const char *runtime_file_user_dir(void);
+int runtime_file_host_path(const char *guest, char *out, size_t size);
 void runtime_savedata_configure(const char *title);
 uintptr_t runtime_savedata_resolve(const char *name);
 void runtime_savedata_report(void);

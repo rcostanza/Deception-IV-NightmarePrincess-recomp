@@ -39,5 +39,6 @@ to it (or pass `--game DIR` to `run.py`). Tests that need it skip without it.
   no data), so DLC means sceAppContent reporting them as installed, not serving files.
 - The engine takes its own command-line switches (strings in the eboot: `-nosplash`, `-no_video`,
   `-no_level_intro`, ...); pass them with `python run.py --guest-arg <switch>`.
-- `skip_intro=1` (settings.ini, default): `-nosplash`, then one Cross on the first title screen
-  (detected by AvPlayer opening `title.mp4`, src/runtime_pad.c), so a start lands in the main menu.
+- `skip_intro=1` (settings.ini, default): src/runtime_intro.c runs the vblank fast and taps Cross
+  through the logos, the autosave notice and the title's Continue, keyed on the archive entries the
+  game reads; a start lands in the main menu (title screen when there is no save).

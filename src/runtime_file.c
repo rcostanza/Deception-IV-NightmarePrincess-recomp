@@ -127,6 +127,8 @@ static int translate(const char *guest,char *out,size_t size) {
     if (result==ENOENT) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
     return result;
 }
+/* The host file a guest path opens (the update's copy when it has one); 0 or a host errno. */
+int runtime_file_host_path(const char *guest, char *out, size_t size) { return translate(guest,out,size); }
 static int host_flags(int flags) {
     int r;
     switch (flags&3) { case 0: r=O_RDONLY; break; case 1: r=O_WRONLY; break; default: r=O_RDWR; }
@@ -466,7 +468,7 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     ssize_t n=pread(h,buffer,size,offset);
     if (n<(ssize_t)size) n=finish_short_read(fd,h,buffer,size,offset,n);
     runtime_wait_end("file pread",wait_start,"bytes",(long long)size);
-    if (n>0) { const File *f=get(fd); if (f && !strcmp(f->path,"/app0/FILE_PS4/archive00.lnk")) runtime_intro_archive_read((uint64_t)offset,(uint64_t)n); }
+    if (n>0) { const File *f=get(fd); if (f && !strncmp(f->path,"/app0/FILE_PS4/",15)) runtime_intro_archive_read(f->path,(uint64_t)offset,(uint64_t)n); }
     if (file_trace_level()==2) printf("File trace: %.3f pread(fd %d %s, %llu @%lld) -> %lld\n",trace_seconds(),fd,traced_path(fd),(unsigned long long)size,(long long)offset,(long long)n);
     if (n<0) { if (file_trace()) printf("File trace: pread(fd %d %s, %llu @%lld) failed, errno %d\n",fd,traced_path(fd),(unsigned long long)size,(long long)offset,errno); return -errno; }
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);

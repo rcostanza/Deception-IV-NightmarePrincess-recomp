@@ -544,7 +544,7 @@ void create_controls() {
     add_folder(ui.update, kUpdateEdit, kUpdateBrowse);
     add_folder(ui.dlc, kDlcEdit, kDlcBrowse);
     add_folder(ui.save, kSaveEdit, kSaveBrowse);
-    ui.skip_intro = add(WC_BUTTONW, L"Skip the intro logos (skip_intro=0 in settings.ini brings them back)",
+    ui.skip_intro = add(WC_BUTTONW, L"Skip the intro to the main menu (skip_intro=0 in settings.ini brings it back)",
                         WS_TABSTOP | BS_OWNERDRAW, rect(kRowLeft + 4, 390, kRowRight - kRowLeft - 8, 30), kSkipIntro);
     ui.play = add(WC_BUTTONW, L"Play Game", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 3 * 128 + 8, kButtonsTop, 120, 36), kPlay);
     ui.install = add(WC_BUTTONW, L"Install", WS_TABSTOP | BS_OWNERDRAW, rect(kWidth - 28 - 2 * 128 + 8, kButtonsTop, 120, 36), IDOK);

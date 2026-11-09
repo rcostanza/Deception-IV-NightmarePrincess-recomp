@@ -50,8 +50,8 @@ int deception_render_4k(void);
 /* 1 when settings.ini hdr (DECEPTION_HDR) is on: the video out offers BT.2020 PQ when the display
  * has an HDR10 surface, and the game then outputs HDR. Valid once deception_gpu_init returned. */
 int deception_hdr(void);
-/* 1 when settings.ini skip_intro (DECEPTION_SKIP_INTRO, default on) is on: the start-up logos are
- * hurried and the autosave notice confirmed (src/runtime_intro.c). Valid once deception_gpu_init
+/* 1 when settings.ini skip_intro (DECEPTION_SKIP_INTRO, default on) is on: the start is hurried
+ * to the main menu, or to the title screen without a save (src/runtime_intro.c). Valid once deception_gpu_init
  * returned. */
 int deception_skip_intro(void);
 /* settings.ini frame_rate (DECEPTION_FRAME_RATE): 30, 60, 90, 120, 144 or 180; the Display Settings panel
