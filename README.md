@@ -24,6 +24,20 @@ This requires you to provide a decrypted dump of your own copy of the game. Only
 - **Easy setup:** point the installer at your dump, and it can add a desktop shortcut (on Linux, an application menu entry).
 - **Portable:** saves, settings and shader caches stay in the game's folder (nothing in `%APPDATA%`).
 
+## Why not just use shadPS4?
+
+shadPS4 is a general PS4 emulator, and this project builds on its video core. It is made for this one game, so it can do things a general emulator does not:
+
+- **Sound and music.** The game's sound engine (KOEI TECMO's KTSL2 mixer and its streamed ATRAC9 music) is implemented in full, so sound effects and music play.
+- **Intro skip.** A start lands on the title menu in about 6 s, past the logos, the autosave notice and "Press ANY button".
+- **One-step setup.** Point the setup at your dump (and optionally its update and DLC): it prepares the game, adds a shortcut or menu entry, and that's it. No emulator settings or game list to manage.
+- **Portable.** Saves, settings, logs and shader caches stay in the game's folders; nothing goes to `%APPDATA%`.
+- **In-game display settings** (F10, or hold Select): window mode, aspect ratio, window size, monitor, VSync and sharpening, changed while you play.
+- **Only options that work for this game.** No frame rate unlock that would speed the game up, no 4K or HDR switches it cannot use.
+- **Help when it breaks.** A crash keeps its log and says where it is; a freeze writes what every thread was doing.
+
+What it does not change: the game still runs at its native 30 FPS and renders at 1080p, as it does on PS4 and on shadPS4.
+
 ## Requirements
 
 - **Windows:** Windows 10 or 11, 64-bit. Python and everything else comes with the release.
