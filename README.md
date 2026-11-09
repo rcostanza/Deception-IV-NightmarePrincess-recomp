@@ -48,7 +48,7 @@ What it does not change: the game still runs at its native 30 FPS (see [Frame ra
 
 ## Install and play
 
-1. [Download the latest release here](https://github.com/rcostanza/deception-recomp/releases/latest)
+1. [Download the latest release here](./releases/latest)
 2. Unzip the release anywhere, for example `C:\Games\Deception`.
 3. Run `deception-setup.exe`.
 4. Choose your **game folder** (the dump), optionally an **update folder** (found by itself when it sits next to the game as `<game>-patch`, as shadPS4 keeps it) and a **DLC folder**, and a **save folder** (by default `save` inside the release folder). Each row says whether the folder is usable, and **Install** turns on once the game folder holds your dump. Press it: setup prepares the game from your dump in a few seconds and offers a desktop shortcut. Your dumps are only read, never changed.
