@@ -229,14 +229,17 @@ def min_glibc(paths):
     return max(versions, key=lambda v: tuple(map(int, v.split('.'))), default=None)
 
 
-def ico_png(ico, size=256):
-    """The PNG frame of `size` pixels in a .ico (the desktop entry's icon)."""
+def ico_png(ico):
+    """The largest PNG frame in a .ico (the desktop entry's icon)."""
     data = ico.read_bytes()
+    frames = []
     for i in range(struct.unpack_from('<H', data, 4)[0]):
         width, _, _, _, _, _, length, offset = struct.unpack_from('<BBBBHHII', data, 6 + 16 * i)
-        if (width or 256) == size and data[offset:offset + 8] == b'\x89PNG\r\n\x1a\n':
-            return data[offset:offset + length]
-    raise SystemExit(f'{ico}: no {size}px PNG frame')
+        if data[offset:offset + 8] == b'\x89PNG\r\n\x1a\n':
+            frames.append((width or 256, data[offset:offset + length]))
+    if not frames:
+        raise SystemExit(f'{ico}: no PNG frame')
+    return max(frames, key=lambda frame: frame[0])[1]
 
 
 def release_name(product='deception-pc'):
