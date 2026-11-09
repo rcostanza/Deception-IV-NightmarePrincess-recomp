@@ -119,7 +119,7 @@ constexpr auto kResolutionSettle = std::chrono::seconds(1);
 // guarded by imgui_mutex.
 std::atomic<bool> exit_open{false};
 int exit_focus = 0;
-enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowFps, RowRender, RowSharpen, RowHdr, RowCount };
+enum DisplayRow : int { RowAspect, RowMode, RowResolution, RowMonitor, RowVsync, RowRender, RowSharpen, RowHdr, RowCount };
 
 // The colours of the game's own menus (Main Menu, Options): teal bars on a dark, see-through
 // backdrop inside a thin cyan frame.
@@ -376,7 +376,6 @@ void ChangeDisplayRow(int row, int delta) {
         s.tearing = next == 2;
         break;
     }
-    case RowFps: s.frame_rate = StepValue(G::FrameRates, s.frame_rate.load(), delta); break;
     case RowRender:
         s.render_resolution = s.render_resolution == DeceptionSettings::Render4k ? DeceptionSettings::Render1080p
                                                                                    : DeceptionSettings::Render4k;
@@ -445,22 +444,7 @@ DisplayRowText DisplayRowAt(int row) {
         return {"VSync", s.vsync ? "On" : s.tearing ? "Off, tearing allowed" : "Off",
                 "On waits for the monitor: no tearing, slightly more input delay. Off shows the newest frame "
                 "at each refresh, still without tearing. Off, tearing allowed shows each frame at once: the "
-                "least delay, and the only way past twice the refresh rate."};
-    case RowFps: {
-        const int chosen = s.frame_rate.load(), runs = DeceptionSettings::EffectiveFrameRate();
-        std::string value = std::to_string(chosen) + " FPS";
-        if (const char* env = std::getenv("DECEPTION_VBLANK_HZ"); env && env[0]) {
-            value += "  (DECEPTION_VBLANK_HZ overrides)";
-        } else if (runs != chosen) {
-            value += "  (display is " + std::to_string(int(DeceptionSettings::DisplayRefresh() + 0.5)) +
-                     " Hz: runs at " + std::to_string(runs) + ")";
-        }
-        return {"Max FPS", value,
-                "The game's frame rate, at normal game speed: 60 is the PS4's, 30 for PCs that cannot hold it. "
-                "Applies at once. It is held "
-                "to what the display refreshes at, and the PC must keep up with it: when it cannot, the "
-                "game runs slower instead of skipping frames."};
-    }
+                "least delay."};
     case RowRender: {
         const int value = s.render_resolution;
         std::string text = value == DeceptionSettings::Render4k ? "4K (3840 x 2160)" : "1080p";

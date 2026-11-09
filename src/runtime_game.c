@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <ctype.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -60,7 +61,41 @@ static ABI void trace_return(uint64_t site, uint64_t value) {
     printf("Trace: call at 0x%llx returned 0x%llx\n",(unsigned long long)site,(unsigned long long)value);
     fflush(stdout);
 }
+/* Writes `n` bytes into the loaded (read-only, executable) image. */
+static void write_code(unsigned char *at, const void *bytes, size_t n) {
+#ifdef _WIN32
+    DWORD old;
+    VirtualProtect(at,n,PAGE_EXECUTE_READWRITE,&old);
+    memcpy(at,bytes,n);
+    VirtualProtect(at,n,old,&old);
+#else
+    unsigned char *page=(unsigned char *)((uintptr_t)at&~(uintptr_t)4095);
+    mprotect(page,(size_t)(at+n-page+4095)&~(size_t)4095,PROT_READ|PROT_WRITE|PROT_EXEC);
+    memcpy(at,bytes,n);
+    mprotect(page,(size_t)(at+n-page+4095)&~(size_t)4095,PROT_READ|PROT_EXEC);
+#endif
+}
+
+/* DECEPTION_POKE=<offset>=<hex bytes>[,...]: writes bytes into the image (development). */
+static void poke(unsigned char *image) {
+    const char *list=getenv("DECEPTION_POKE");
+    for (const char *s=list; s && *s;) {
+        char *end;
+        const uint64_t at=strtoull(s,&end,16);
+        if (end==s || *end!='=') break;
+        s=end+1;
+        unsigned char bytes[64]; size_t n=0;
+        while (n<sizeof(bytes) && isxdigit((unsigned char)s[0]) && isxdigit((unsigned char)s[1])) {
+            char two[3]={s[0],s[1],0}; bytes[n++]=(unsigned char)strtoul(two,NULL,16); s+=2;
+        }
+        if (*s==',') ++s;
+        write_code(image+at,bytes,n);
+        printf("Poke: %zu bytes at 0x%llx\n",n,(unsigned long long)at);
+    }
+}
+
 void runtime_game_trace_calls(unsigned char *image) {
+    poke(image);
     const char *list=getenv("DECEPTION_TRACE_CALLS");
     if (!list || !*list) return;
     unsigned char *stubs=runtime_image_map(65536,PROT_READ|PROT_WRITE|PROT_EXEC), *p=stubs;

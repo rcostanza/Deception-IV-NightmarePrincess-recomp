@@ -37,15 +37,14 @@ public:
     // deception: Relaxed by default: without readbacks, guest code that reads GPU-written
     // vertices sees stale data; Relaxed costs no measurable frame rate.
     u32 GetReadbacksMode() { static const auto value = u32(Number("DECEPTION_READBACKS", GpuReadbacksMode::Relaxed)); return value; }
-    // deception: the vblank runs at settings.ini frame_rate, read at each call (the Display
-    // Settings panel changes it): the game waits for one vblank a frame. At 30 it stays 60: an
-    // engine target of 30 makes the game set a flip rate of 1 (a flip every second vblank), as
-    // the PS4's 30 FPS games do, so a 30 Hz vblank ran it at 15. DECEPTION_VBLANK_HZ fixes it
-    // (measurements).
+    // deception: the PS4's 60 Hz vblank. Deception sets a flip rate of 1 (a flip every second
+    // vblank, 30 FPS) and steps its game logic once a frame, so any other rate changes the game's
+    // speed; skip_intro's fast logos raise it for a moment (deception_vblank_boost).
+    // DECEPTION_VBLANK_HZ fixes it (measurements).
     u32 GetVblankFrequency() {
         static const long fixed = Number("DECEPTION_VBLANK_HZ", -1);
         if (const int boost = deception_vblank_boost(); boost > 0) return u32(boost);
-        return fixed > 0 ? u32(fixed) : u32(std::max(deception_frame_rate(), 60));
+        return fixed > 0 ? u32(fixed) : 60u;
     }
     // The vblank period. A display within 0.5 Hz of the vblank rate (a 59.95 Hz panel at the
     // default 60) sets it exactly: at 60.00 Hz the game made 0.05 frames a second more than the
