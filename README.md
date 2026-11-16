@@ -34,7 +34,7 @@ shadPS4 is a general PS4 emulator, and this project builds on its video core. It
 - **Intro skip.** A start lands on the title menu in about 6 s, past the logos, the autosave notice and "Press ANY button".
 - **One-step setup.** Point the setup at your dump (and optionally its update and DLC): it prepares the game, adds a shortcut or menu entry, and that's it. No emulator settings or game list to manage.
 - **Portable.** Saves, settings, logs and shader caches stay in the game's folders; nothing goes to `%APPDATA%`.
-- **In-game display settings** (F10, or hold Select): window mode, window size, monitor, VSync and sharpening, changed while you play, on a page styled like the game's own menus.
+- **In-game display settings** (F10, or hold Select or Start): window mode, window size, monitor, VSync and sharpening, changed while you play, on a page styled like the game's own menus.
 - **Only options that work for this game.** No frame rate unlock that would speed the game up, no 4K or HDR switches it cannot use.
 - **Help when it breaks.** A crash keeps its log and says where it is; a freeze writes what every thread was doing.
 
@@ -129,12 +129,12 @@ clicks the touchpad. The keyboard works alongside a gamepad:
 | Tab, P                    | Options                  |
 | T                         | touchpad click           |
 
-| Shortcut                        | What it does                                  |
-| ------------------------------- | --------------------------------------------- |
-| **F10**, or hold **Select** 2 s | Display Settings                              |
-| **F9**                          | sharpening on or off                          |
-| **F4**                          | asks "Exit Deception?" (No is selected first) |
-| **Alt+F4**                      | closes the game without confirmation          |
+| Shortcut                                     | What it does                                  |
+| -------------------------------------------- | --------------------------------------------- |
+| **F10**, or hold **Select** or **Start** 2 s | Display Settings                              |
+| **F9**                                       | sharpening on or off                          |
+| **F4**, or **Select**+**Start**              | asks "Exit Deception?" (No is selected first) |
+| **Alt+F4**                                   | closes the game without confirmation          |
 
 ## When something goes wrong
 

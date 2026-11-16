@@ -248,35 +248,53 @@ static void host_read(PadData *d, SDL_Gamepad *g, uint8_t connected_count) {
     if (k) sample_keyboard(d,k);
 }
 
-/* Host thread: Select (Back/View/Share) held for SELECT_HOLD_US opens the Display Settings panel.
- * What Select presses (the touchpad click) is held back while it is down and
- * played as a SELECT_TAP_US tap when it is let go sooner; after the panel opened it is dropped. */
-enum { SELECT_HOLD_US=2000000, SELECT_TAP_US=60000 };
-static void select_hold(PadData *d, SDL_Gamepad *g, uint64_t now) {
-    static uint64_t since, tap_until;
-    static bool opened; /* this hold opened the panel, or an overlay had the input: no tap */
-    uint32_t bits=0;
-    for (size_t i=0;i<pad_map.count;++i)
-        if (pad_map.entries[i].source==SDL_GAMEPAD_BUTTON_BACK) bits|=pad_map.entries[i].ps;
-    const bool down=g && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_BACK);
-    if (down) {
-        if (!since) { since=now; opened=false; }
-        if (deception_gpu_overlay_captures_input()) opened=true;
-        d->buttons&=~bits;
-        if (!opened && now-since>=SELECT_HOLD_US) {
-            opened=true;
-            if (!deception_display_settings_is_open()) {
-                deception_display_settings_open();
-                puts("Runtime: Select held; Display Settings opened");
-            }
+/* Host thread: Select (Back/View/Share) or Start held for MENU_HOLD_US opens the Display Settings
+ * panel, and both down together open the exit prompt. What each presses (the touchpad click,
+ * Options) is held back while it is down and played as a MENU_TAP_US tap when it is let go sooner;
+ * after a hold or the pair opened a page, or while an overlay has the input, it is dropped. */
+enum { MENU_HOLD_US=2000000, MENU_TAP_US=60000 };
+typedef struct { SDL_GamepadButton button; const char *name; uint64_t since, tap_until; bool used; } MenuButton;
+static MenuButton menu_buttons[]={{SDL_GAMEPAD_BUTTON_BACK,"Select",0,0,false},{SDL_GAMEPAD_BUTTON_START,"Start",0,0,false}};
+static void menu_buttons_update(PadData *d, SDL_Gamepad *g, uint64_t now) {
+    const bool captured=deception_gpu_overlay_captures_input();
+    bool all_down=true;
+    for (size_t b=0;b<2;++b) {
+        MenuButton *m=&menu_buttons[b];
+        uint32_t bits=0;
+        for (size_t i=0;i<pad_map.count;++i)
+            if (pad_map.entries[i].source==(int)m->button) bits|=pad_map.entries[i].ps;
+        const bool down=g && SDL_GetGamepadButton(g,m->button);
+        all_down&=down;
+        if (down) {
+            if (!m->since) { m->since=now; m->used=false; }
+            if (captured) m->used=true;
+            d->buttons&=~bits;
+            continue;
+        }
+        if (m->since) {
+            if (!m->used) m->tap_until=now+MENU_TAP_US;
+            m->since=0;
+        }
+        if (now<m->tap_until) d->buttons|=bits;
+    }
+    if (all_down) {
+        if (!menu_buttons[0].used || !menu_buttons[1].used) {
+            menu_buttons[0].used=menu_buttons[1].used=true;
+            deception_exit_prompt_open();
+            puts("Runtime: Select+Start; exit prompt opened");
         }
         return;
     }
-    if (since) {
-        if (!opened) tap_until=now+SELECT_TAP_US;
-        since=0;
+    for (size_t b=0;b<2;++b) {
+        MenuButton *m=&menu_buttons[b];
+        if (m->since && !m->used && now-m->since>=MENU_HOLD_US) {
+            m->used=true;
+            if (!deception_display_settings_is_open()) {
+                deception_display_settings_open();
+                printf("Runtime: %s held; Display Settings opened\n",m->name);
+            }
+        }
     }
-    if (now<tap_until) d->buttons|=bits;
 }
 
 /* Host thread: samples every millisecond (SDL_DelayNS waits on a high resolution timer) and
@@ -294,7 +312,7 @@ static void *host_thread(void *arg) {
         if (sdl_ready>0) g=host_gamepad(g,start,&next_scan,&connected_count);
         PadData d;
         host_read(&d,g,connected_count);
-        select_hold(&d,g,start);
+        menu_buttons_update(&d,g,start);
         pthread_mutex_lock(&host_lock);
         host_sample=d;
         const uint8_t large=rumble.large, small=rumble.small;

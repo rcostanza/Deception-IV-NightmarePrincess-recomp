@@ -59,7 +59,7 @@ bool CapturesInput();
 void OpenDisplaySettings();
 bool DisplaySettingsOpen();
 
-/// Any thread: asks "Exit Deception?" with No focused (also F4; Back on the title screen); Yes
+/// Any thread: asks "Exit Deception?" with No focused (also F4, or Select+Start); Yes
 /// pushes SDL_EVENT_QUIT (as closing the window). It takes the input while open.
 void OpenExitPrompt();
 

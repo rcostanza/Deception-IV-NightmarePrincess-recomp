@@ -37,7 +37,7 @@ int deception_gpu_choice_confirm(const char *title, const char *const *items, in
                                  const unsigned char *png, uint64_t size, const char *caption, const char *unavailable);
 /* 1 while a dialog (save list, text entry) is shown: the game's pad input is held neutral. */
 int deception_gpu_overlay_captures_input(void);
-/* Opens the Display Settings panel (F10, or Select held for 2 s: runtime_pad.c); 1 while it is open. */
+/* Opens the Display Settings panel (F10, or Select or Start held for 2 s: runtime_pad.c); 1 while it is open. */
 void deception_display_settings_open(void);
 int deception_display_settings_is_open(void);
 /* Asks "Exit Deception?" (No focused); Yes closes the game as closing its window does. Any thread. */

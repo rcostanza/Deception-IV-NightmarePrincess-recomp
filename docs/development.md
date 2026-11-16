@@ -130,10 +130,11 @@ notice, and "Press ANY button" gets one Cross 3 s after its data loads, which op
 (`COMMON_WINDOW_G1T`, `TITLEMENU_G1T` in `FILE_PS4/archive00.lnk`, found by name in its `.h`). The
 tap is single on purpose: a second one could choose a menu entry.
 
-F4 asks "Exit Deception?" anywhere. The prompt is drawn by the overlay and takes the input while
-open; Yes pushes the same quit event as closing the window. Holding Select (SDL's Back button) for
-two seconds opens the Display Settings panel (F10 too): the button's own press is held back while it
-is down, and a release before two seconds sends it to the game as a short tap.
+F4, or Select and Start pressed together, asks "Exit Deception?" anywhere. The prompt is drawn by
+the overlay and takes the input while open; Yes pushes the same quit event as closing the window.
+Holding Select (SDL's Back button) or Start for two seconds opens the Display Settings panel (F10
+too): each button's own press is held back while it is down, and a release before two seconds (and
+without the other button) sends it to the game as a short tap.
 
 ## Update, save data, DLC and trophies
 

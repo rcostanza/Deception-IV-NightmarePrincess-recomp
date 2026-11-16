@@ -99,7 +99,7 @@ ImTextureData* splash_texture = nullptr;
 std::atomic<int> splash_state{SplashNone}, splash_lit_frames{0};
 std::atomic<s64> splash_since{0}, splash_fade_from{0};
 std::chrono::steady_clock::time_point last_present{};
-// The Display Settings panel (F10, or Select held for 2 s: src/runtime_pad.c). The row and
+// The Display Settings panel (F10, or Select or Start held for 2 s: src/runtime_pad.c). The row and
 // dirty flag are guarded by imgui_mutex; the values live in DeceptionSettings.
 std::atomic<bool> display_open{false};
 
@@ -110,7 +110,7 @@ bool display_dirty = false;
 std::pair<int, int> pending_resolution{0, 0};
 std::chrono::steady_clock::time_point pending_since{};
 constexpr auto kResolutionSettle = std::chrono::seconds(1);
-// The exit prompt (F4, or Back on the title screen: src/runtime_pad.c); its focus (0 No, 1 Yes) is
+// The exit prompt (F4, or Select+Start: src/runtime_pad.c); its focus (0 No, 1 Yes) is
 // guarded by imgui_mutex.
 std::atomic<bool> exit_open{false};
 int exit_focus = 0;

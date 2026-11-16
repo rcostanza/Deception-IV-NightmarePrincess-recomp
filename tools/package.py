@@ -85,8 +85,8 @@ shadPS4's <game>-patch and dlc/CUSA02859 folders work as they are. No game files
 Run deception-setup.exe again to change the game or save folder. After unpacking a newer release
 over this folder, run it once more: it keeps your folders and settings.
 
-In the game: F10, or Select (Share/View) held for two seconds, opens the display settings (window,
-resolution, VSync, sharpening); F4 asks to close the game.
+In the game: F10, or Select (Share/View) or Start held for two seconds, opens the display settings
+(window, resolution, VSync, sharpening); F4, or Select and Start together, asks to close the game.
 
 settings.ini (made by the setup) holds the window, audio and control options; one in your save
 folder is read instead, and the display settings save there. If the game stops, the reason is in
@@ -113,8 +113,8 @@ shadPS4's <game>-patch and dlc/CUSA02859 folders work as they are. No game files
 Run deception-setup again to change the game or save folder. After unpacking a newer release
 over this folder, run it once more: it keeps your folders and settings.
 
-In the game: F10, or Select (Share/View) held for two seconds, opens the display settings (window,
-resolution, VSync, sharpening); F4 asks to close the game.
+In the game: F10, or Select (Share/View) or Start held for two seconds, opens the display settings
+(window, resolution, VSync, sharpening); F4, or Select and Start together, asks to close the game.
 
 settings.ini (made by the setup) holds the window, audio and control options; one in your save
 folder is read instead, and the display settings save there. If the game stops, the reason is in
